@@ -1,0 +1,11 @@
+{
+  "name": "Mun Computer",
+  "description": "MUN Computer Business Manager is a next-generation, cloud-ready enterprise management system specifically designed for modern Cyber Cafes, Customer Service Centers (CSC), and Banking Customer Service Points (PNB CSP). Built with a powerful multi-functional architecture, it seamlessly integrates daily financial bookkeeping, digital service tracking, and advanced 90-day citizen grievance management into a single intuitive platform.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

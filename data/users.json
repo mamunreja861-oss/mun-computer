@@ -1,0 +1,20 @@
+[
+  {
+    "requestId": "MC-ADM-14012025",
+    "uid": "MC-ADM-14012025",
+    "name": "Sarmina Khatun",
+    "fullName": "Sarmina Khatun",
+    "role": "ADMIN",
+    "isMainAdmin": true,
+    "isSuperAdmin": true,
+    "designation": "Permanent Master Administrator",
+    "phone": "9735407045",
+    "phoneMasked": "XXXXXX7045",
+    "aadhaarMasked": "XXXX XXXX 9364",
+    "email": "admin@muncomputer.in",
+    "address": "MUN COMPUTER, Mamudpur, Juginda, Domkal, Murshidabad - 742406",
+    "status": "ACTIVE",
+    "approvalStatus": "APPROVED",
+    "verificationStatus": "VERIFIED"
+  }
+]

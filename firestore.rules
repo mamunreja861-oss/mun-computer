@@ -1,0 +1,550 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all reads and writes by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Core Primitives & Identity Helpers
+    // ---------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isVerifiedBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email in ['muncomputer786@gmail.com', 'mamunreja861@gmail.com'];
+    }
+
+    function isAdmin() {
+      return isVerifiedBootstrapAdmin()
+        || (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ---------------------------------------------------------
+    // Validation Blueprints (Anti-Update-Gap)
+    // ---------------------------------------------------------
+    function isValidAdminMarker(data) {
+      return data.keys().hasAll(['uid', 'erpUid', 'isSuperAdmin', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'erpUid', 'isSuperAdmin', 'createdAt'])
+        && isValidId(data.uid)
+        && data.erpUid is string && data.erpUid.size() >= 3 && data.erpUid.size() <= 40 && data.erpUid.matches('^[A-Z0-9\\-]+$')
+        && data.isSuperAdmin is bool
+        && data.createdAt is timestamp;
+    }
+
+    function isValidUserPublic(data) {
+      return data.keys().hasAll(['uid', 'requestId', 'displayName', 'role', 'status', 'approvalStatus', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'erpUid', 'requestId', 'displayName', 'role', 'status', 'approvalStatus', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && (!('erpUid' in data) || (data.erpUid is string && data.erpUid.size() <= 40 && data.erpUid.matches('^[A-Z0-9\\-]*$')))
+        && data.requestId is string && data.requestId.size() >= 5 && data.requestId.size() <= 40 && data.requestId.matches('^REQ-[0-9]{4}-[0-9]+$')
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role in ['ADMIN', 'MANAGER', 'STAFF', 'MAKER', 'CHECKER']
+        && data.status in ['PENDING_APPROVAL', 'ACTIVE', 'REJECTED', 'CORRECTION_REQUIRED', 'SUSPENDED']
+        && data.approvalStatus in ['PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CORRECTION_REQUIRED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserPrivate(data) {
+      return data.keys().hasAll(['ownerId', 'phoneMasked', 'aadhaarMasked', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'phoneMasked', 'aadhaarMasked', 'email', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && data.phoneMasked is string && data.phoneMasked.size() >= 4 && data.phoneMasked.size() <= 20
+        && data.aadhaarMasked is string && data.aadhaarMasked.size() >= 8 && data.aadhaarMasked.size() <= 20
+        && (!('email' in data) || (data.email is string && data.email.size() <= 160))
+        && (!('district' in data) || (data.district is string && data.district.size() <= 80))
+        && (!('blockOrMunicipality' in data) || (data.blockOrMunicipality is string && data.blockOrMunicipality.size() <= 100))
+        && (!('villageOrWard' in data) || (data.villageOrWard is string && data.villageOrWard.size() <= 120))
+        && (!('pinCode' in data) || (data.pinCode is string && data.pinCode.size() == 6 && data.pinCode.matches('^[0-9]{6}$')))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserRequest(data) {
+      return data.keys().hasAll(['requestId', 'ownerId', 'fullName', 'requestedRole', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'aadhaarMasked', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['requestId', 'ownerId', 'fullName', 'requestedRole', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'aadhaarMasked', 'status', 'createdAt', 'updatedAt'])
+        && data.requestId is string && data.requestId.size() >= 5 && data.requestId.size() <= 40 && data.requestId.matches('^REQ-[0-9]{4}-[0-9]+$')
+        && isValidId(data.ownerId)
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.requestedRole in ['ADMIN', 'MANAGER', 'STAFF', 'MAKER', 'CHECKER']
+        && data.district is string && data.district.size() >= 2 && data.district.size() <= 80
+        && data.blockOrMunicipality is string && data.blockOrMunicipality.size() >= 2 && data.blockOrMunicipality.size() <= 100
+        && data.villageOrWard is string && data.villageOrWard.size() >= 1 && data.villageOrWard.size() <= 120
+        && data.pinCode is string && data.pinCode.size() == 6 && data.pinCode.matches('^[0-9]{6}$')
+        && data.aadhaarMasked is string && data.aadhaarMasked.size() >= 8 && data.aadhaarMasked.size() <= 20
+        && data.status in ['SUBMITTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'CORRECTION_REQUIRED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidService(data) {
+      return data.keys().hasAll(['serviceId', 'name', 'category', 'price', 'status', 'isDeleted', 'position', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['serviceId', 'name', 'category', 'subcategory', 'price', 'govFee', 'description', 'status', 'isDeleted', 'position', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.serviceId is string && data.serviceId.size() >= 5 && data.serviceId.size() <= 40 && data.serviceId.matches('^SRV-[0-9]{4}-[0-9]+$')
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 160
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 100
+        && (!('subcategory' in data) || (data.subcategory is string && data.subcategory.size() <= 100))
+        && data.price is number && data.price >= 0 && data.price <= 1000000
+        && (!('govFee' in data) || (data.govFee is number && data.govFee >= 0 && data.govFee <= 1000000))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && data.status in ['ACTIVE', 'INACTIVE']
+        && data.isDeleted is bool
+        && data.position is int && data.position >= 0 && data.position <= 100000
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['customerId', 'ownerId', 'name', 'phoneMasked', 'district', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['customerId', 'ownerId', 'name', 'phoneMasked', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'createdAt', 'updatedAt'])
+        && data.customerId is string && data.customerId.size() >= 5 && data.customerId.size() <= 40 && data.customerId.matches('^CUST-[0-9]{4}-[0-9]+$')
+        && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && data.phoneMasked is string && data.phoneMasked.size() >= 4 && data.phoneMasked.size() <= 20
+        && data.district is string && data.district.size() >= 2 && data.district.size() <= 80
+        && (!('blockOrMunicipality' in data) || (data.blockOrMunicipality is string && data.blockOrMunicipality.size() <= 100))
+        && (!('villageOrWard' in data) || (data.villageOrWard is string && data.villageOrWard.size() <= 120))
+        && (!('pinCode' in data) || (data.pinCode is string && data.pinCode.size() <= 6))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidApplication(data) {
+      return data.keys().hasAll(['applicationId', 'customerId', 'serviceId', 'serviceName', 'status', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['applicationId', 'customerId', 'serviceId', 'serviceName', 'status', 'assignedTo', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.applicationId is string && data.applicationId.size() >= 5 && data.applicationId.size() <= 40 && data.applicationId.matches('^APP-[0-9]{4}-[0-9]+$')
+        && data.customerId is string && data.customerId.size() >= 5 && data.customerId.size() <= 40 && data.customerId.matches('^CUST-[0-9]{4}-[0-9]+$')
+        && data.serviceId is string && data.serviceId.size() >= 5 && data.serviceId.size() <= 40 && data.serviceId.matches('^SRV-[0-9]{4}-[0-9]+$')
+        && data.serviceName is string && data.serviceName.size() >= 2 && data.serviceName.size() <= 160
+        && data.status in ['New', 'Pending', 'Under Process', 'Under Verification', 'Hold Up', 'Completed', 'Rejected', 'Cancelled']
+        && (!('assignedTo' in data) || (data.assignedTo is string && data.assignedTo.size() <= 128))
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['documentId', 'applicationId', 'customerId', 'fileName', 'mimeType', 'sizeBytes', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['documentId', 'applicationId', 'customerId', 'fileName', 'mimeType', 'sizeBytes', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.documentId is string && data.documentId.size() >= 5 && data.documentId.size() <= 40 && data.documentId.matches('^DOC-[0-9]{4}-[0-9]+$')
+        && data.applicationId is string && data.applicationId.size() >= 5 && data.applicationId.size() <= 40
+        && data.customerId is string && data.customerId.size() >= 5 && data.customerId.size() <= 40
+        && data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 200
+        && data.mimeType in ['application/pdf', 'image/jpeg', 'image/png', 'image/webp']
+        && data.sizeBytes is int && data.sizeBytes > 0 && data.sizeBytes <= 5242880
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLocationMaster(data) {
+      return data.keys().hasAll(['locId', 'level', 'name', 'verificationStatus', 'sourceName', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['locId', 'level', 'name', 'originalSpelling', 'correctedEnglishName', 'verificationStatus', 'sourceName', 'ownerId', 'createdAt', 'updatedAt'])
+        && isValidId(data.locId)
+        && data.level in ['DISTRICT', 'SUBDIVISION', 'BLOCK', 'GP', 'MUNICIPALITY', 'WARD', 'MOUZA', 'VILLAGE', 'LOCALITY', 'POST_OFFICE', 'PINCODE', 'POLLING_STATION']
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && (!('originalSpelling' in data) || (data.originalSpelling is string && data.originalSpelling.size() <= 160))
+        && (!('correctedEnglishName' in data) || (data.correctedEnglishName is string && data.correctedEnglishName.size() <= 160))
+        && data.verificationStatus in ['VERIFIED', 'PENDING_VERIFICATION', 'REJECTED']
+        && data.sourceName is string && data.sourceName.size() >= 2 && data.sourceName.size() <= 160
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLocationImport(data) {
+      return data.keys().hasAll(['importId', 'sourceName', 'totalRows', 'status', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['importId', 'sourceName', 'totalRows', 'status', 'ownerId', 'createdAt', 'updatedAt'])
+        && isValidId(data.importId)
+        && data.sourceName is string && data.sourceName.size() >= 2 && data.sourceName.size() <= 160
+        && data.totalRows is int && data.totalRows >= 0 && data.totalRows <= 50000
+        && data.status in ['PENDING_VERIFICATION', 'APPROVED', 'PARTIAL', 'REJECTED']
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['logId', 'action', 'details', 'ownerId', 'createdAt'])
+        && data.keys().hasOnly(['logId', 'action', 'details', 'ownerId', 'createdAt'])
+        && isValidId(data.logId)
+        && data.action is string && data.action.size() >= 2 && data.action.size() <= 80
+        && data.details is string && data.details.size() >= 2 && data.details.size() <= 1000
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidCounter(data) {
+      return data.keys().hasAll(['counterId', 'year', 'seq', 'updatedAt'])
+        && data.keys().hasOnly(['counterId', 'year', 'seq', 'updatedAt'])
+        && data.counterId is string && data.counterId.size() >= 2 && data.counterId.size() <= 40 && data.counterId.matches('^[A-Z0-9_\\-]+$')
+        && data.year is int && data.year >= 2020 && data.year <= 2100
+        && data.seq is int && data.seq >= 0 && data.seq <= 100000000
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMurshidabadVillage(data) {
+      return data.keys().hasAll(['villageId', 'district', 'blockOrMunicipality', 'villageOrLocality', 'pinCode', 'areaType', 'verificationStatus', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['villageId', 'district', 'blockOrMunicipality', 'gpOrWard', 'villageOrLocality', 'pinCode', 'postOffice', 'policeStation', 'areaType', 'verificationStatus', 'ownerId', 'createdAt', 'updatedAt'])
+        && isValidId(data.villageId)
+        && data.district is string && data.district.size() >= 2 && data.district.size() <= 80
+        && data.blockOrMunicipality is string && data.blockOrMunicipality.size() >= 2 && data.blockOrMunicipality.size() <= 100
+        && (!('gpOrWard' in data) || (data.gpOrWard is string && data.gpOrWard.size() >= 1 && data.gpOrWard.size() <= 100))
+        && data.villageOrLocality is string && data.villageOrLocality.size() >= 1 && data.villageOrLocality.size() <= 160
+        && data.pinCode is string && data.pinCode.size() == 6 && data.pinCode.matches('^[0-9]{6}$')
+        && (!('postOffice' in data) || (data.postOffice is string && data.postOffice.size() <= 100))
+        && (!('policeStation' in data) || (data.policeStation is string && data.policeStation.size() <= 100))
+        && data.areaType in ['RURAL', 'URBAN']
+        && data.verificationStatus in ['VERIFIED', 'PENDING_VERIFICATION', 'REJECTED']
+        && isValidId(data.ownerId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // ---------------------------------------------------------
+    // Connection Health Probe
+    // ---------------------------------------------------------
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    // ---------------------------------------------------------
+    // Admins Lookup Collection
+    // ---------------------------------------------------------
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isVerifiedBootstrapAdmin() && resource.data.isSuperAdmin is bool;
+      allow create: if isVerifiedBootstrapAdmin()
+        && isValidId(adminId)
+        && isValidAdminMarker(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isVerifiedBootstrapAdmin()
+        && isValidId(adminId)
+        && isValidAdminMarker(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Users (Public Operational Profile + Split Private PII)
+    // ---------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserPublic(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().role == 'STAFF'
+        && incoming().status == 'PENDING_APPROVAL'
+        && incoming().approvalStatus == 'PENDING_APPROVAL'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidUserPublic(incoming())
+        && incoming().uid == existing().uid
+        && incoming().requestId == existing().requestId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (isOwner(userId) || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isVerifiedBootstrapAdmin());
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && isValidUserPrivate(incoming())
+          && isOwner(userId)
+          && incoming().ownerId == request.auth.uid
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && isValidUserPrivate(incoming())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            isAdmin() ||
+            (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['phoneMasked', 'email', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'updatedAt']))
+          );
+        allow delete: if false;
+      }
+    }
+
+    // ---------------------------------------------------------
+    // User Registration Approval Queue
+    // ---------------------------------------------------------
+    match /user_requests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidUserRequest(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().status in ['SUBMITTED', 'PENDING_APPROVAL']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidUserRequest(incoming())
+        && incoming().requestId == existing().requestId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            existing().ownerId == request.auth.uid
+            && existing().status == 'CORRECTION_REQUIRED'
+            && incoming().status == 'PENDING_APPROVAL'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'status', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Service Catalog (Soft-Delete & Restore)
+    // ---------------------------------------------------------
+    match /services/{serviceId} {
+      allow get: if isSignedIn() && isValidId(serviceId) && (existing().isDeleted == false || isAdmin());
+      allow list: if isSignedIn() && (resource.data.isDeleted == false || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin()
+        && isValidId(serviceId)
+        && isValidService(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(serviceId)
+        && isValidService(incoming())
+        && incoming().serviceId == existing().serviceId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'subcategory', 'price', 'govFee', 'description', 'status', 'isDeleted', 'position', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Customers Directory
+    // ---------------------------------------------------------
+    match /customers/{customerId} {
+      allow get: if isSignedIn() && isValidId(customerId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(customerId)
+        && isValidCustomer(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(customerId)
+        && isValidCustomer(incoming())
+        && incoming().customerId == existing().customerId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phoneMasked', 'district', 'blockOrMunicipality', 'villageOrWard', 'pinCode', 'updatedAt']))
+        );
+      allow delete: if isAdmin() && isValidId(customerId);
+    }
+
+    // ---------------------------------------------------------
+    // Applications Workflow (Relational Integrity + Terminal Lock)
+    // ---------------------------------------------------------
+    match /applications/{applicationId} {
+      allow get: if isSignedIn() && isValidId(applicationId) && (existing().ownerId == request.auth.uid || existing().assignedTo == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.assignedTo == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(applicationId)
+        && isValidApplication(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().status in ['New', 'Pending']
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/customers/$(incoming().customerId))
+        && exists(/databases/$(database)/documents/services/$(incoming().serviceId));
+      allow update: if isVerifiedUser()
+        && isValidId(applicationId)
+        && isValidApplication(incoming())
+        && incoming().applicationId == existing().applicationId
+        && incoming().customerId == existing().customerId
+        && incoming().serviceId == existing().serviceId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            !(existing().status in ['Completed', 'Rejected', 'Cancelled'])
+            && (existing().ownerId == request.auth.uid || existing().assignedTo == request.auth.uid)
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Documents Vault (Relational Parent Check)
+    // ---------------------------------------------------------
+    match /documents/{documentId} {
+      allow get: if isSignedIn() && isValidId(documentId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(documentId)
+        && isValidDocument(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/customers/$(incoming().customerId))
+        && exists(/databases/$(database)/documents/applications/$(incoming().applicationId));
+      allow update: if isAdmin()
+        && isValidId(documentId)
+        && isValidDocument(incoming())
+        && incoming().documentId == existing().documentId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fileName', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(documentId);
+    }
+
+    // ---------------------------------------------------------
+    // Murshidabad & Domkal Municipality Location Master & Imports
+    // ---------------------------------------------------------
+    match /locations_master/{locId} {
+      allow get: if isSignedIn() && isValidId(locId) && (existing().verificationStatus == 'VERIFIED' || isAdmin());
+      allow list: if isSignedIn() && (resource.data.verificationStatus == 'VERIFIED' || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin()
+        && isValidId(locId)
+        && isValidLocationMaster(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(locId)
+        && isValidLocationMaster(incoming())
+        && incoming().locId == existing().locId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'correctedEnglishName', 'verificationStatus', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /location_imports/{importId} {
+      allow get: if isAdmin() && isValidId(importId);
+      allow list: if isVerifiedBootstrapAdmin() && resource.data.status is string;
+      allow create: if isAdmin()
+        && isValidId(importId)
+        && isValidLocationImport(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(importId)
+        && isValidLocationImport(incoming())
+        && incoming().importId == existing().importId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'totalRows', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Append-Only Audit Logs
+    // ---------------------------------------------------------
+    match /audit_logs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isVerifiedBootstrapAdmin());
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidAuditLog(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Atomic Monotonic Yearly Counters (Admin Only)
+    // ---------------------------------------------------------
+    match /counters/{counterId} {
+      allow get: if isAdmin() && isValidId(counterId);
+      allow list: if isVerifiedBootstrapAdmin() && resource.data.seq is int;
+      allow create: if isAdmin()
+        && isValidId(counterId)
+        && isValidCounter(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(counterId)
+        && isValidCounter(incoming())
+        && incoming().counterId == existing().counterId
+        && incoming().seq == existing().seq + 1
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['seq', 'year', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Murshidabad District Village & PIN Code Database (Admin CRUD)
+    // ---------------------------------------------------------
+    match /murshidabad_villages/{villageId} {
+      allow get: if isSignedIn() && isValidId(villageId) && (existing().verificationStatus == 'VERIFIED' || isAdmin());
+      allow list: if isSignedIn() && (resource.data.verificationStatus == 'VERIFIED' || isVerifiedBootstrapAdmin());
+      allow create: if isAdmin()
+        && isValidId(villageId)
+        && isValidMurshidabadVillage(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(villageId)
+        && isValidMurshidabadVillage(incoming())
+        && incoming().villageId == existing().villageId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['district', 'blockOrMunicipality', 'gpOrWard', 'villageOrLocality', 'pinCode', 'postOffice', 'policeStation', 'areaType', 'verificationStatus', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(villageId);
+    }
+  }
+}

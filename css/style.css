@@ -1,0 +1,435 @@
+:root {
+  --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Official Corporate ERP Palette */
+  --navy-sidebar: #0b1530;
+  --navy-sidebar-hover: #14244e;
+  --royal-blue: #2456c7;
+  --royal-blue-hover: #1d47a8;
+  --champagne-gold: #d6b56d;
+  --soft-blue: #eaf1ff;
+  --emerald-green: #10b981;
+  --flame-red: #ef4444;
+  --amber-warning: #f59e0b;
+  --purple-accent: #8b5cf6;
+  --cyan-accent: #06b6d4;
+
+  --bg-canvas: #f8fafc;
+  --surface: #ffffff;
+  --surface-alt: #f1f5f9;
+  --surface-hover: #e2e8f0;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  --navy-950: #060d1f;
+  --navy-900: #0b1530;
+  --navy-800: #13224a;
+  --navy-700: #1c3269;
+  --navy-600: #2456c7;
+
+  --blue-600: #2456c7;
+  --blue-500: #3b6fe0;
+  --blue-100: #dce8ff;
+  --blue-50: #eaf1ff;
+
+  /* Semantic Supporting Accents */
+  --teal-700: #1d47a8;
+  --teal-600: #2456c7;
+  --teal-500: #3b6fe0;
+  --teal-100: #dce8ff;
+  --teal-50: #eaf1ff;
+
+  --green-700: #047857;
+  --green-600: #059669;
+  --green-500: #10b981;
+  --green-100: #d1fae5;
+  --green-50: #ecfdf5;
+
+  --violet-700: #6d28d9;
+  --violet-600: #7c3aed;
+  --violet-500: #8b5cf6;
+  --violet-100: #ede9fe;
+  --violet-50: #f5f3ff;
+
+  --orange-700: #b45309;
+  --orange-600: #d97706;
+  --orange-500: #f59e0b;
+  --orange-100: #fef3c7;
+  --orange-50: #fffbeb;
+
+  --grad-teal-blue: linear-gradient(135deg, #2456c7 0%, #1d47a8 100%);
+  --grad-green: linear-gradient(135deg, #059669 0%, #10b981 100%);
+  --grad-violet: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
+  --grad-orange: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+  --grad-4color: linear-gradient(90deg, #0b1530 0%, #2456c7 60%, #d6b56d 100%);
+
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --text-subtle: #94a3b8;
+  --text-inverse: #ffffff;
+
+  --success: #10b981;
+  --success-bg: #ecfdf5;
+  --success-border: #a7f3d0;
+
+  --warning: #d97706;
+  --warning-bg: #fffbeb;
+  --warning-border: #fde68a;
+
+  --danger: #ef4444;
+  --danger-bg: #fef2f2;
+  --danger-border: #fecaca;
+
+  --info: #0891b2;
+  --info-bg: #ecfeff;
+  --info-border: #a5f3fc;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --shadow-sm: 0 1px 2px 0 rgba(11, 21, 48, 0.05);
+  --shadow-md: 0 4px 10px -2px rgba(11, 21, 48, 0.07), 0 2px 4px -2px rgba(11, 21, 48, 0.04);
+  --shadow-lg: 0 12px 24px -4px rgba(11, 21, 48, 0.1), 0 4px 8px -4px rgba(11, 21, 48, 0.05);
+
+  --header-height: 64px;
+  --sidebar-width: 274px;
+  --sidebar-collapsed-width: 76px;
+}
+
+/* Dark Mode Support */
+html.dark {
+  --bg-canvas: #070d1c;
+  --surface: #0e172e;
+  --surface-alt: #162242;
+  --surface-hover: #1f2f58;
+  --border-subtle: #1e2d52;
+  --border-strong: #2b3f70;
+
+  --blue-600: #5b8af5;
+  --blue-50: rgba(36, 86, 199, 0.18);
+  --teal-600: #5b8af5;
+  --teal-50: rgba(36, 86, 199, 0.18);
+  --green-50: rgba(16, 185, 129, 0.14);
+  --violet-50: rgba(139, 92, 246, 0.16);
+  --orange-50: rgba(245, 158, 11, 0.16);
+
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+
+  --success: #34d399;
+  --success-bg: #052e16;
+  --success-border: #14532d;
+  --warning: #fbbf24;
+  --warning-bg: #451a03;
+  --warning-border: #92400e;
+  --danger: #f87171;
+  --danger-bg: #450a0a;
+  --danger-border: #7f1d1d;
+  --info: #22d3ee;
+  --info-bg: #083344;
+  --info-border: #155e75;
+}
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: var(--bg-canvas);
+    color: var(--text-main);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  #root, #erp-root {
+    min-height: 100vh;
+    width: 100%;
+    background-color: var(--bg-canvas);
+  }
+
+  /* Tabular figures for all numeric and monetary text */
+  .tabular-nums, .num, .amount, .date, .code {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.25;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button, input, select, textarea {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+    border: none;
+    background: none;
+  }
+
+  /* Accessibility Focus Ring */
+  :focus-visible {
+    outline: 2px solid var(--blue-600);
+    outline-offset: 2px;
+  }
+
+  /* Legacy Utility Helpers for Vanilla JS ERP views */
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .flex { display: flex; }
+  .flex-col { flex-direction: column; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .justify-center { justify-content: center; }
+  .gap-1 { gap: 0.25rem; }
+  .gap-2 { gap: 0.5rem; }
+  .gap-3 { gap: 0.75rem; }
+  .gap-4 { gap: 1rem; }
+  .gap-6 { gap: 1.5rem; }
+}
+
+#erp-root .hidden {
+  display: none !important;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 9999px;
+}
+
+/* Iframe-safe In-App & Corporate A4 Print Support */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .toast-container,
+  .modal-overlay:not(#a4-print-popup-overlay):not(#inapp-print-overlay),
+  .sidebar,
+  .topbar,
+  .no-print {
+    display: none !important;
+  }
+
+  body.printing-inapp-sheet > *:not(#inapp-print-overlay) {
+    display: none !important;
+  }
+  body.printing-inapp-sheet #inapp-print-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+  body.printing-inapp-sheet #inapp-print-card {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  body.printing-a4-popup > *:not(#a4-print-popup-overlay) {
+    display: none !important;
+  }
+  body.printing-a4-popup #a4-print-popup-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+  body.printing-a4-popup #a4-sheet-outer {
+    max-width: 100% !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  body.printing-a4-popup #a4-sheet-wrapper,
+  body.printing-a4-popup #a4-sheet-wrapper *,
+  .mun-bw-doc,
+  .mun-bw-doc * {
+    color: #000000 !important;
+    border-color: #000000 !important;
+    background-color: #ffffff !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.printing-a4-popup #a4-sheet-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+  }
+  body.printing-a4-popup thead {
+    display: table-header-group;
+  }
+  body.printing-a4-popup tfoot {
+    display: table-footer-group;
+  }
+  body.printing-a4-popup tr,
+  body.printing-a4-popup .a4-avoid-break,
+  body.printing-a4-popup .stat-card,
+  body.printing-a4-popup .kpi-card {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* PVC Card Isolated Print Mode */
+  body.printing-pvc-card .sidebar,
+  body.printing-pvc-card .topbar,
+  body.printing-pvc-card .page-header,
+  body.printing-pvc-card .pvc-controls-col {
+    display: none !important;
+  }
+  body.printing-pvc-card .pvc-card-preview,
+  body.printing-pvc-card #pvc-card-preview {
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Thermal 80mm POS Receipt Sizing inside A4 Print Popup */
+  body.printing-a4-popup.printing-thermal-80mm #a4-sheet-wrapper {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    padding: 2mm !important;
+    margin: 0 auto !important;
+  }
+
+  /* Isolated Barcode Thermal Sticker Sheet Print Mode */
+  body.printing-barcode-sheet .sidebar,
+  body.printing-barcode-sheet .topbar,
+  body.printing-barcode-sheet .page-header,
+  body.printing-barcode-sheet .finance-subnav-bar,
+  body.printing-barcode-sheet #barcode-controls-panel,
+  body.printing-barcode-sheet #barcode-preview-panel {
+    display: none !important;
+  }
+  body.printing-barcode-sheet .app-layout,
+  body.printing-barcode-sheet .main-wrapper,
+  body.printing-barcode-sheet .page-container {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    min-height: 0 !important;
+    background: #ffffff !important;
+  }
+  body.printing-barcode-sheet #barcode-print-stage {
+    display: block !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.printing-barcode-sheet .barcode-sticker-item {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Isolated Digital Referral Pass & Proof Print Mode */
+  body.printing-referral-pass > *:not(#app-modal-overlay) {
+    display: none !important;
+  }
+  body.printing-referral-pass #app-modal-overlay {
+    position: static !important;
+    inset: auto !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+  body.printing-referral-pass .modal-box,
+  body.printing-referral-pass .modal-body {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+  body.printing-referral-pass .modal-header {
+    display: none !important;
+  }
+  body.printing-referral-pass #referral-pass-print-card {
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    max-width: 170mm !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
+
+.amount-words-hint {
+  font-size: 0.71rem;
+  font-weight: 600;
+  color: var(--blue-600);
+  margin-top: 0.22rem;
+  line-height: 1.35;
+}
+
+.a4-avoid-break {
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+

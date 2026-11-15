@@ -1,0 +1,696 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted administrator marker document used for RBAC verification without trusting client claims.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "erpUid": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 40,
+          "pattern": "^[A-Z0-9\\-]+$"
+        },
+        "isSuperAdmin": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "erpUid", "isSuperAdmin", "createdAt"]
+    },
+    "UserProfilePublic": {
+      "title": "UserProfilePublic",
+      "description": "Non-PII operational profile for an ERP user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "erpUid": {
+          "type": "string",
+          "maxLength": 40,
+          "pattern": "^[A-Z0-9\\-]*$"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^REQ-[0-9]{4}-[0-9]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["ADMIN", "MANAGER", "STAFF", "MAKER", "CHECKER"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING_APPROVAL", "ACTIVE", "REJECTED", "CORRECTION_REQUIRED", "SUSPENDED"]
+        },
+        "approvalStatus": {
+          "type": "string",
+          "enum": ["PENDING_APPROVAL", "APPROVED", "REJECTED", "CORRECTION_REQUIRED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "requestId", "displayName", "role", "status", "approvalStatus", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII subcollection document for user contact, masked Aadhaar, and address.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "phoneMasked": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "aadhaarMasked": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "district": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "blockOrMunicipality": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "villageOrWard": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "pinCode": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$",
+          "maxLength": 6
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "phoneMasked", "aadhaarMasked", "createdAt", "updatedAt"]
+    },
+    "UserRequest": {
+      "title": "UserRequest",
+      "description": "New user registration request awaiting Super Admin approval.",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^REQ-[0-9]{4}-[0-9]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "requestedRole": {
+          "type": "string",
+          "enum": ["ADMIN", "MANAGER", "STAFF", "MAKER", "CHECKER"]
+        },
+        "district": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "blockOrMunicipality": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "villageOrWard": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "pinCode": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$",
+          "maxLength": 6
+        },
+        "aadhaarMasked": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "enum": ["SUBMITTED", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CORRECTION_REQUIRED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["requestId", "ownerId", "fullName", "requestedRole", "district", "blockOrMunicipality", "villageOrWard", "pinCode", "aadhaarMasked", "status", "createdAt", "updatedAt"]
+    },
+    "ServiceCatalogItem": {
+      "title": "ServiceCatalogItem",
+      "description": "Soft-deletable central service catalog definition.",
+      "type": "object",
+      "properties": {
+        "serviceId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^SRV-[0-9]{4}-[0-9]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "category": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "subcategory": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "price": {
+          "type": "number"
+        },
+        "govFee": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "isDeleted": {
+          "type": "boolean"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["serviceId", "name", "category", "price", "status", "isDeleted", "position", "ownerId", "createdAt", "updatedAt"]
+    },
+    "CustomerRecord": {
+      "title": "CustomerRecord",
+      "description": "Central customer master record.",
+      "type": "object",
+      "properties": {
+        "customerId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^CUST-[0-9]{4}-[0-9]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "phoneMasked": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 20
+        },
+        "district": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "blockOrMunicipality": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "villageOrWard": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "pinCode": {
+          "type": "string",
+          "maxLength": 6
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["customerId", "ownerId", "name", "phoneMasked", "district", "createdAt", "updatedAt"]
+    },
+    "ApplicationRecord": {
+      "title": "ApplicationRecord",
+      "description": "Customer service application record with status workflow.",
+      "type": "object",
+      "properties": {
+        "applicationId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^APP-[0-9]{4}-[0-9]+$"
+        },
+        "customerId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^CUST-[0-9]{4}-[0-9]+$"
+        },
+        "serviceId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^SRV-[0-9]{4}-[0-9]+$"
+        },
+        "serviceName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["New", "Pending", "Under Process", "Under Verification", "Hold Up", "Completed", "Rejected", "Cancelled"]
+        },
+        "assignedTo": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["applicationId", "customerId", "serviceId", "serviceName", "status", "ownerId", "createdAt", "updatedAt"]
+    },
+    "DocumentMetadata": {
+      "title": "DocumentMetadata",
+      "description": "Uploaded document metadata linked to a customer and application.",
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40,
+          "pattern": "^DOC-[0-9]{4}-[0-9]+$"
+        },
+        "applicationId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40
+        },
+        "customerId": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 40
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "mimeType": {
+          "type": "string",
+          "enum": ["application/pdf", "image/jpeg", "image/png", "image/webp"]
+        },
+        "sizeBytes": {
+          "type": "integer"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["documentId", "applicationId", "customerId", "fileName", "mimeType", "sizeBytes", "ownerId", "createdAt", "updatedAt"]
+    },
+    "LocationMasterRecord": {
+      "title": "LocationMasterRecord",
+      "description": "Verified or pending administrative location entry for Murshidabad / Domkal Municipality.",
+      "type": "object",
+      "properties": {
+        "locId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "level": {
+          "type": "string",
+          "enum": ["DISTRICT", "SUBDIVISION", "BLOCK", "GP", "MUNICIPALITY", "WARD", "MOUZA", "VILLAGE", "LOCALITY", "POST_OFFICE", "PINCODE", "POLLING_STATION"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "originalSpelling": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "correctedEnglishName": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["VERIFIED", "PENDING_VERIFICATION", "REJECTED"]
+        },
+        "sourceName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["locId", "level", "name", "verificationStatus", "sourceName", "ownerId", "createdAt", "updatedAt"]
+    },
+    "LocationImportBatch": {
+      "title": "LocationImportBatch",
+      "description": "Admin import staging batch with verification status and audit metadata.",
+      "type": "object",
+      "properties": {
+        "importId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 60,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "sourceName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "totalRows": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING_VERIFICATION", "APPROVED", "PARTIAL", "REJECTED"]
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["importId", "sourceName", "totalRows", "status", "ownerId", "createdAt", "updatedAt"]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Immutable append-only security and operational audit record.",
+      "type": "object",
+      "properties": {
+        "logId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "details": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 1000
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["logId", "action", "details", "ownerId", "createdAt"]
+    },
+    "CounterRecord": {
+      "title": "CounterRecord",
+      "description": "Monotonic yearly sequence counter.",
+      "type": "object",
+      "properties": {
+        "counterId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 40,
+          "pattern": "^[A-Z0-9_\\-]+$"
+        },
+        "year": {
+          "type": "integer"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["counterId", "year", "seq", "updatedAt"]
+    },
+    "MurshidabadVillageRecord": {
+      "title": "MurshidabadVillageRecord",
+      "description": "Murshidabad district village or municipality locality record with District, Block/Municipality, Village/Locality, and 6-digit PIN Code.",
+      "type": "object",
+      "properties": {
+        "villageId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "district": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "blockOrMunicipality": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 100
+        },
+        "gpOrWard": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "villageOrLocality": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "pinCode": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 6,
+          "pattern": "^[0-9]{6}$"
+        },
+        "postOffice": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "policeStation": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "areaType": {
+          "type": "string",
+          "enum": ["RURAL", "URBAN"]
+        },
+        "verificationStatus": {
+          "type": "string",
+          "enum": ["VERIFIED", "PENDING_VERIFICATION", "REJECTED"]
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["villageId", "district", "blockOrMunicipality", "villageOrLocality", "pinCode", "areaType", "verificationStatus", "ownerId", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Trusted administrator lookup collection"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfilePublic" },
+      "description": "Non-PII operational ERP user profiles"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Split-collection isolated PII for user accounts"
+    },
+    "/user_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/UserRequest" },
+      "description": "New user registration queue pending Super Admin approval"
+    },
+    "/services/{serviceId}": {
+      "schema": { "$ref": "#/entities/ServiceCatalogItem" },
+      "description": "Central service catalog items supporting soft delete and restore"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/CustomerRecord" },
+      "description": "Central customer master directory"
+    },
+    "/applications/{applicationId}": {
+      "schema": { "$ref": "#/entities/ApplicationRecord" },
+      "description": "Customer service applications with status history"
+    },
+    "/documents/{documentId}": {
+      "schema": { "$ref": "#/entities/DocumentMetadata" },
+      "description": "Document metadata linked to customer and application"
+    },
+    "/locations_master/{locId}": {
+      "schema": { "$ref": "#/entities/LocationMasterRecord" },
+      "description": "Murshidabad and Domkal Municipality master location records"
+    },
+    "/location_imports/{importId}": {
+      "schema": { "$ref": "#/entities/LocationImportBatch" },
+      "description": "Admin CSV/Excel/LGD location import staging batches"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogEntry" },
+      "description": "Append-only operational and security audit trail"
+    },
+    "/counters/{counterId}": {
+      "schema": { "$ref": "#/entities/CounterRecord" },
+      "description": "Atomic monotonic yearly sequence counters"
+    },
+    "/murshidabad_villages/{villageId}": {
+      "schema": { "$ref": "#/entities/MurshidabadVillageRecord" },
+      "description": "Murshidabad district villages and Domkal municipality localities with District, Block/Municipality, Village/Locality, and PIN Code"
+    }
+  }
+}

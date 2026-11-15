@@ -1,0 +1,587 @@
+Upgrade the "Sales & Billing" and "New Invoice / Billing" modules across the entire application with the following enterprise-grade features:
+
+1. Barcode & QR Code Quick Scan Support:
+- Add a fast Barcode/SKU input scanner field in the billing item table that instantly adds the product and updates the total quantity without manual dropdown searching.
+
+2. One-Click Thermal POS Receipt Printing:
+- Add a dedicated "Print POS Receipt (3-inch Thermal)" button alongside standard Print/PDF options to generate a clean, condensed thermal-printer-friendly receipt format.
+
+3. Direct WhatsApp Invoice Sharing:
+- Add an instant "Send to WhatsApp" button on invoice generation that compiles the bill details/PDF and triggers a direct click-to-chat WhatsApp link to the customer's mobile number.
+
+4. Multi-Payment Split Support (Cash + UPI + Due):
+- Allow splitting any invoice payment across multiple modes simultaneously (e.g., partial Cash + partial UPI/QR + remaining Balance Due) with auto-calculated balance tracking and ledger updates.
+
+Preserve all existing GST calculations, customer ledger integration, and ERP styling. 
+
+
+
+
+
+Upgrade the "Barcode & SKU Label Generator" module in the SYSTEM & SECURITY section with the following professional features:
+
+1. Direct Thermal Printer & JPG/Image Download Support:
+- Add a dedicated "Download as JPG / Image" button right next to the barcode preview box so staff can instantly save any product's barcode label as a crisp image file.
+- Add a "Print Thermal Label (2-inch / 3-inch)" button configured with clean CSS print styles `@media print` so it fits perfectly onto standard thermal sticker rolls without extra page margins.
+
+2. Batch Barcode Generation & Custom Size Controls:
+- Allow selecting multiple products or setting a custom quantity count (e.g., print 10 stickers for Suraksha Gas Hose Pipe at once).
+- Add layout size toggles (e.g., Standard Retail Label vs. Compact Mini Sticker).
+
+Preserve all existing SKU bindings, pricing displays, and ERP styling.
+
+
+Upgrade the "Finance & Accounting" module across the MUN COMPUTER ERP system with the following enterprise-grade features and accuracy improvements:
+
+1. Real-Time Cash & Bank Reconciliation:
+- Enhance the "Bank Reconciliation" and "Counter Day Book" modules so that cash collected at the counter and digital UPI/Bank receipts reconcile automatically against daily ledger entries without manual discrepancies.
+
+2. Automated Tax Liability Tracking (GST Output vs Input):
+- Link the "GST Management" and "Profit & Loss / Balance Sheet" modules so that GST collected from sales invoices (Output GST) and GST paid on purchase bills (Input GST) automatically calculate net tax payable or receivable in real time.
+
+3. Expense & Income Categorization:
+- Ensure all "Expense Management" and "Income Management" entries instantly update the General Ledger, Daily Closing Cash drawers, and Profit & Loss statement categorized correctly (e.g., Operating Expenses, Utility Bills, Service Commissions).
+
+4. Financial Statement Auto-Balancing:
+- Verify that Total Assets strictly balance with Total Liabilities & Owner Capital in the Balance Sheet module with zero floating errors.
+
+
+
+
+
+Update the "Service / Product Interest *" input field and dropdown selection across the Lead Management, Customer Registration, Gas Booking, and Service Request modules with the following exact specifications:
+
+1. Dynamic Rate Chart Auto-Fetch:
+- Connect the "Service / Product Interest *" input/dropdown directly to the live "Service List & Rate Chart" database/state.
+- Automatically fetch and display all active services, schemes, and items (with their corresponding shop charges and government fees) so they appear instantly as options whenever the service selection bar or dropdown is clicked.
+
+2. Searchable & Multi-Select Integration:
+- Enable real-time search filtering (matching both English and Bengali service names) as the user types into the Service / Product Interest field.
+- Ensure that selecting any service automatically populates the correct pricing and tags across leads, customer profiles, and billing modules without manual entry. 
+
+
+
+
+Upgrade the "Growth & Marketing Reports" module across the MUN COMPUTER ERP system with professional visual data analytics:
+
+1. Dynamic Bar Charts for All Marketing Reports:
+- For every report type under Growth & Marketing (e.g., Lead Conversion Rate, Referral Growth, Customer Acquisition Sources, Campaign Performance, and Service Interest Trends), display a clean, responsive **Bar Chart** at the top of the section using the system's charting library (e.g., Chart.js / ApexCharts).
+- Ensure the bar charts dynamically update whenever date filters or category filters are applied.
+
+2. Detailed Data Tables Below Charts:
+- Right below each visual bar chart, maintain a structured, searchable **Detailed Data Table** containing exact figures, customer counts, conversion dates, and revenue metrics.
+
+3. Export & Summary Stats:
+- Include summary KPI cards at the top (Total Leads, Active Referrals, Conversion %, Growth Rate) and add export options (Export to CSV / PDF) for all marketing reports.
+
+
+Upgrade the entire "Growth & Marketing Reports" module in the MUN COMPUTER ERP system to display complete details accompanied by visual bar charts for every single marketing metric:
+
+1. Comprehensive Report Categories with Bar Charts:
+- **Lead Acquisition & Conversion Report:** Show a visual bar chart comparing New Leads vs. Converted Leads by Month/Week, followed by a full detailed table with Prospect Name, Mobile, Service Interest, and Status.
+- **Customer Referral Performance Report:** Show a bar chart displaying top referrers and total referral counts, followed by a detailed table showing Referrer ID, Name, Referred Customer, Commission Amount (₹), and Status.
+- **Service & Product Interest Analytics:** Show a bar chart comparing which services (e.g., Gas Booking, Suraksha Hose Pipe, Aadhaar/Banking services, Cyber Cafe) are most in-demand, followed by a detailed breakdown table.
+- **Campaign & Outreach ROI Report:** Show a bar chart tracking campaign response rates and a detailed log table below it.
+
+2. Unified UI Layout per Report:
+- Top Section: Interactive Date Filter & Summary KPI Cards (Total Volume, Conversion %, Revenue).
+- Middle Section: Clean, responsive **Bar Chart** visualizing the trend.
+- Bottom Section: Comprehensive, searchable **Detailed Data Table** listing every individual entry with export options (CSV/PDF). 
+
+
+
+
+Update and redesign the "Company Profile" page in the MUN COMPUTER ERP system with the following professional, corporate-grade content and layout:
+
+1. Company Header & Overview Card:
+- **Company Name:** MUN COMPUTER & DIGITAL SERVICES
+- **Tagline:** Your Trusted Hub for Digital Solutions, Financial Inclusion & Government Utility Services
+- **Establishment / Trust Badge:** Certified Enterprise Partner & Multi-Service Hub
+
+2. Professional About Us Section:
+- "MUN COMPUTER is a premier multi-service technology and digital hub dedicated to bridging the digital divide in rural and semi-urban communities. We specialize in providing seamless access to essential digital governance schemes, financial inclusion services (CSP & Banking), LPG & utility management, high-speed cyber café operations, and professional retail billing solutions. Driven by innovation, transparency, and customer-first values, our mission is to empower businesses and individuals with fast, reliable, and secure technology-enabled services."
+
+3. Core Business Verticals (Structured Grid/Badges):
+- **Financial Inclusion & Banking:** PNB/IndusInd CSP, AEPS, Micro-ATM, and Daily Cash Management.
+- **Government & Social Schemes:** Annapurna Yojana, Aadhaar/Digital Documentation, and Welfare Service Portals.
+- **LPG & Energy Services:** Gas Customer Registration, Booking Dispatch, Doorstep GPS Delivery, and Subsidy/DBT Tracking.
+- **Retail & Enterprise Billing:** POS Invoicing, Barcode Label Generation, Service Rate Charts, and Automated Customer Ledger.
+- **Marketing & Growth Analytics:** Advanced Lead Tracking, Referral Pass Systems, and Real-Time Business Performance Reports.
+
+4. Professional Footer & Contact Details block:
+- **Head Office / Hub Location:** Domkal, Murshidabad, West Bengal, Pin - 742303
+- **Official Contact & Support:** Dedicated helpdesk integration with instant WhatsApp dispatch, secure role-based staff authentication, and automated audit logs.
+
+Ensure the layout features clean corporate branding, modern card containers, and responsive styling matching the ERP theme.
+
+
+
+
+Upgrade the Customer Referral Management module in MUN Computer Business Manager by adding an interactive Referral Proof & Shareable Pass Generator without removing or breaking any existing data or workflows:
+
+1. Action Button & Auto-Trigger:
+- In the Customer Referrals table (under the Actions column) and immediately after saving a new referral entry, add a prominent button labeled 🪪 Generate Referral Pass / Proof.
+- Clicking this button opens a responsive modal displaying a professionally styled Digital Referral Pass / Receipt Card.
+
+2. Digital Referral Pass Card Design & Content:
+- Shop Header & Stamp: Display MUN COMPUTER branding with an official verified badge and diagonal watermark MUN COMPUTER - Verified Referral Proof, plus a footer stamp Authorized CSC & PNB BC Point.
+- Unique Tracking Code: Auto-generate and display a unique tracking ID in the format REF-2026-NOV-XXX (e.g., REF-2026-NOV-001) linked to the global sequential counter.
+- Referrer Info: Referrer Name and Customer ID (e.g., Mamun Reja - MC2600000).
+- Referred Customer Info: Referred Customer Name, Mobile Number, and Selected Service/Scheme.
+- Timestamp: Exact Date & Time when the referral was recorded.
+
+3. Multi-Channel Sharing, Download & Print:
+- Share via WhatsApp Button: Opens https://wa.me/?text=... with a clean, pre-formatted WhatsApp receipt message containing the Tracking Code, Referrer Name & ID, Referred Customer Name, Date, and official verification note from MUN Computer.
+- Download Pass (PNG) Button: Renders the digital pass card cleanly into a downloadable high-resolution PNG image so it can be shared directly as an image card on WhatsApp or saved on mobile/desktop.
+- Print Referral Proof Button: Uses a dedicated @media print stylesheet to print only the isolated referral pass card cleanly without printing the background dashboard.
+
+
+
+
+
+import React, { useState } from 'react';
+import { 
+  ShieldCheck, ShieldAlert, Key, Lock, Clock, AlertTriangle, 
+  RefreshCw, CheckCircle2, QrCode, Smartphone, FileText, UserCheck, Activity, Terminal 
+} from 'lucide-react';
+
+export default function SecurityPoliciesModule() {
+  // Security Policies State
+  const [policies, setPolicies] = useState({
+    maxFailedLogins: 5,
+    maxFailedResets: 3,
+    lockoutDurationMinutes: 30,
+    sessionLockTimeoutMinutes: 15,
+    dailyPasswordChangeLimit: 2,
+    mandateDeleteReason: true,
+    argon2idEnforced: true,
+    csrfProtection: true,
+    rateLimiting: true,
+    totpMfaEnforced: true
+  });
+
+  // TOTP State
+  const [totpEnrolled, setTotpEnrolled] = useState(true);
+  const [showTotpModal, setShowTotpModal] = useState(false);
+  const [backupCodes, setBackupCodes] = useState([
+    'MUN-8492-AX', 'MUN-3921-BY', 'MUN-1048-CZ', 'MUN-9283-DX',
+    'MUN-5519-EX', 'MUN-7402-FX', 'MUN-6120-GX', 'MUN-4918-HX'
+  ]);
+
+  // Audit Logs State (Simulated Immutable Logs)
+  const [auditLogs, setAuditLogs] = useState([
+    { id: 'LOG-26-001', actor: 'Main Admin', action: 'DELETE_CUSTOMER', target: 'CUST-26-0042', reason: 'Duplicate customer entry created by mistake.', time: '2026-11-15 11:30 AM' },
+    { id: 'LOG-26-002', actor: 'Staff - Rahul', action: 'UPDATE_STATUS', target: 'APP-26-0102', reason: 'N/A (Status Update)', time: '2026-11-15 10:15 AM' }
+  ]);
+
+  // Deletion Test Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteTargetId, setDeleteTargetId] = useState('APP-26-0999');
+
+  const handlePolicyChange = (key, value) => {
+    setPolicies(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSavePolicies = (e) => {
+    e.preventDefault();
+    alert('🔒 Enterprise Security Policies updated & enforced successfully via Argon2id & Zero-Trust engine!');
+  };
+
+  const handleSimulateDeletion = (e) => {
+    e.preventDefault();
+    if (deleteReason.trim().length < 10) {
+      alert('⚠️ Mandatory Compliance Error: Deletion reason must be at least 10 characters long.');
+      return;
+    }
+    const newLog = {
+      id: `LOG-26-0${auditLogs.length + 1}`,
+      actor: 'Main Admin',
+      action: 'SECURE_DELETE',
+      target: deleteTargetId,
+      reason: deleteReason,
+      time: new Date().toLocaleString()
+    };
+    setAuditLogs([newLog, ...auditLogs]);
+    setDeleteReason('');
+    setShowDeleteModal(false);
+    alert('✅ Record securely archived with immutable Audit Log entry.');
+  };
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-8 bg-slate-50 min-h-screen text-slate-800">
+      
+      {/* 1. Header & Posture Status Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-2xl shadow-xl border border-indigo-900/50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm tracking-wider uppercase mb-1">
+            <ShieldCheck className="w-5 h-5 text-emerald-400" /> Enterprise Zero-Trust Architecture
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">System Security Policies & MFA Control Center</h1>
+          <p className="text-slate-300 text-sm mt-1">Manage cryptographic hashing, brute-force lockouts, TOTP tokens, and mandatory deletion audit compliance.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-medium rounded-full flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> Argon2id Active
+          </span>
+          <span className="px-3 py-1 bg-teal-500/20 border border-teal-500/40 text-teal-300 text-xs font-medium rounded-full flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5" /> CSRF Protected
+          </span>
+          <span className="px-3 py-1 bg-violet-500/20 border border-violet-500/40 text-violet-300 text-xs font-medium rounded-full flex items-center gap-1.5">
+            <Key className="w-3.5 h-3.5" /> TOTP MFA Required
+          </span>
+        </div>
+      </div>
+
+      <form onSubmit={handleSavePolicies} className="space-y-8">
+        
+        {/* 2. Main Admin TOTP MFA Management Card */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-violet-50 text-violet-600 rounded-xl">
+                <Smartphone className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Main Admin TOTP Two-Factor Authentication (MFA)</h2>
+                <p className="text-sm text-slate-500">Google Authenticator / Authy / Aegis TOTP token enforcement for Super Admin login.</p>
+              </div>
+            </div>
+            <span className={`px-3 py-1 text-xs font-semibold rounded-full ${totpEnrolled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+              {totpEnrolled ? '🛡️ Enrolled & Active' : '⚠️ Setup Required'}
+            </span>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+            <div className="md:col-span-2 space-y-3">
+              <p className="text-sm text-slate-600">
+                Main Administrator account requires time-based one-time password (TOTP) verification on every new IP session or critical financial export. Rate-limited to 5 verification attempts per 5 minutes.
+              </p>
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTotpModal(true)}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-xl transition shadow-sm flex items-center gap-2"
+                >
+                  <QrCode className="w-4 h-4" /> View QR & Backup Recovery Codes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setTotpEnrolled(false); alert('TOTP Device reset. Re-enrollment required on next login.'); }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-xl transition"
+                >
+                  Reset TOTP Device
+                </button>
+              </div>
+            </div>
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
+              <span className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Active Algorithm</span>
+              <div className="text-base font-bold text-slate-800 mt-1">TOTP SHA-1 / 30s Step</div>
+              <span className="text-xs text-emerald-600 font-medium mt-1 block">8 Backup Keys Generated</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Server Authentication, Rate-Limit & Lockout Policies Grid */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div className="flex items-center gap-3 pb-4 border-b border-slate-100 mb-6">
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+              <Lock className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Server Authentication & Brute-Force Lockout Policies</h2>
+              <p className="text-sm text-slate-500">Configure thresholds for failed attempts, cooldown periods, and idle session lockouts.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            
+            {/* Field 1 */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+                <span>Max Failed Login Attempts</span>
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">Attempts</span>
+              </label>
+              <input
+                type="number"
+                min="3"
+                max="10"
+                value={policies.maxFailedLogins}
+                onChange={(e) => handlePolicyChange('maxFailedLogins', parseInt(e.target.value))}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+              />
+              <p className="text-xs text-slate-400">IP/Account temporary ban threshold after consecutive incorrect passwords.</p>
+            </div>
+
+            {/* Field 2 */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+                <span>Max Failed Reset Attempts</span>
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">Limit</span>
+              </label>
+              <input
+                type="number"
+                min="2"
+                max="5"
+                value={policies.maxFailedResets}
+                onChange={(e) => handlePolicyChange('maxFailedResets', parseInt(e.target.value))}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+              />
+              <p className="text-xs text-slate-400">Password reset token abuse protection limit per hour.</p>
+            </div>
+
+            {/* Field 3 */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+                <span>Lockout Duration (Minutes)</span>
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">Cooldown</span>
+              </label>
+              <input
+                type="number"
+                min="5"
+                max="120"
+                value={policies.lockoutDurationMinutes}
+                onChange={(e) => handlePolicyChange('lockoutDurationMinutes', parseInt(e.target.value))}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+              />
+              <p className="text-xs text-slate-400">Duration the account remains locked after exceeding failed attempts.</p>
+            </div>
+
+            {/* Field 4 */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+                <span>Session Lock Timeout (Minutes)</span>
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">Idle Limit</span>
+              </label>
+              <input
+                type="number"
+                min="5"
+                max="60"
+                value={policies.sessionLockTimeoutMinutes}
+                onChange={(e) => handlePolicyChange('sessionLockTimeoutMinutes', parseInt(e.target.value))}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+              />
+              <p className="text-xs text-slate-400">Auto-lock screen after inactivity requiring PIN or password re-entry.</p>
+            </div>
+
+            {/* Field 5 */}
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 flex items-center justify-between">
+                <span>Daily Password Change Limit</span>
+                <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-bold">Per Account</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={policies.dailyPasswordChangeLimit}
+                onChange={(e) => handlePolicyChange('dailyPasswordChangeLimit', parseInt(e.target.value))}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 font-medium"
+              />
+              <p className="text-xs text-slate-400">Preventative limit against account takeover and rapid credential cycling.</p>
+            </div>
+
+          </div>
+        </div>
+
+        {/* 4. Mandatory Delete Reason & Immutable Audit Logging */}
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center pb-4 border-b border-slate-100 gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Mandate Delete Reason & Immutable Audit Logging</h2>
+                <p className="text-sm text-slate-500">Enforce strict accountability when deleting customer records, applications, or ledger entries.</p>
+              </div>
+            </div>
+            
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input 
+                type="checkbox" 
+                checked={policies.mandateDeleteReason} 
+                onChange={(e) => handlePolicyChange('mandateDeleteReason', e.target.checked)}
+                className="sr-only peer" 
+              />
+              <div className="w-14 h-7 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[4px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-emerald-600"></div>
+              <span className="ml-3 text-sm font-bold text-slate-700">{policies.mandateDeleteReason ? 'Mandatory ON' : 'Optional'}</span>
+            </label>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <div className="flex flex-col md:flex-row items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-200 gap-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Test Deletion Compliance Workflow</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Clicking this simulates deleting a record to verify that the mandatory reason modal appears and writes to the audit log.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-medium rounded-xl transition shadow-sm whitespace-nowrap"
+              >
+                Simulate Record Deletion
+              </button>
+            </div>
+
+            {/* Audit Log Table */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-indigo-600" /> Immutable Security Audit Trail
+                </h3>
+                <span className="text-xs text-slate-400">Total Entries: {auditLogs.length} (Read-Only)</span>
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-semibold uppercase tracking-wider">
+                      <th className="p-3">Log ID</th>
+                      <th className="p-3">Actor</th>
+                      <th className="p-3">Action</th>
+                      <th className="p-3">Target ID</th>
+                      <th className="p-3">Compliance Reason</th>
+                      <th className="p-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {auditLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50">
+                        <td className="p-3 font-mono font-bold text-indigo-600">{log.id}</td>
+                        <td className="p-3 font-medium text-slate-800">{log.actor}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded font-semibold text-[10px]">
+                            {log.action}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-slate-600">{log.target}</td>
+                        <td className="p-3 text-slate-700 italic">"{log.reason}"</td>
+                        <td className="p-3 text-slate-500">{log.time}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Save Bar */}
+        <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+          <button
+            type="button"
+            onClick={() => alert('Policies restored to OWASP secure defaults.')}
+            className="px-6 py-3 bg-white hover:bg-slate-100 text-slate-700 font-semibold rounded-xl border border-slate-300 transition shadow-sm"
+          >
+            Restore OWASP Defaults
+          </button>
+          <button
+            type="submit"
+            className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold rounded-xl transition shadow-lg shadow-indigo-200 flex items-center gap-2"
+          >
+            <ShieldCheck className="w-5 h-5" /> Save & Enforce Security Policies
+          </button>
+        </div>
+
+      </form>
+
+      {/* TOTP Modal */}
+      {showTotpModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Key className="w-5 h-5 text-violet-600" /> Main Admin TOTP Setup
+              </h3>
+              <button onClick={() => setShowTotpModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+            </div>
+            
+            <div className="text-center space-y-3">
+              <div className="w-40 h-40 bg-slate-100 border-2 border-dashed border-slate-300 rounded-2xl mx-auto flex flex-col items-center justify-center p-4">
+                <QrCode className="w-16 h-16 text-slate-700 mb-1" />
+                <span className="text-[10px] text-slate-400 font-mono">otpauth://totp/MUN:Admin?secret=JBSWY3DPEHPK3PXP</span>
+              </div>
+              <p className="text-xs text-slate-500">Scan this QR code using Google Authenticator, Authy, or Aegis app.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Single-Use Backup Recovery Codes (8)</label>
+              <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200 font-mono text-xs text-slate-800">
+                {backupCodes.map((code, idx) => (
+                  <div key={idx} className="bg-white px-2 py-1 rounded border border-slate-200 text-center">{code}</div>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400">Store these codes securely. Each can be used once if your authenticator device is lost.</p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setShowTotpModal(false)}
+                className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl transition shadow-sm"
+              >
+                Close & Confirm Setup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mandatory Deletion Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-rose-600 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" /> Mandatory Compliance Deletion
+              </h3>
+              <button onClick={() => setShowDeleteModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+            </div>
+
+            <form onSubmit={handleSimulateDeletion} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Target Record ID</label>
+                <input 
+                  type="text" 
+                  value={deleteTargetId} 
+                  onChange={(e) => setDeleteTargetId(e.target.value)}
+                  className="w-full mt-1 px-3 py-2 bg-slate-100 rounded-xl border border-slate-200 font-mono text-sm text-slate-800" 
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">Deletion Reason (Minimum 10 characters) *</label>
+                <textarea 
+                  rows="3"
+                  value={deleteReason}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  placeholder="Specify clear operational or regulatory reason for deletion..."
+                  className="w-full mt-1 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-sm text-slate-800"
+                  required
+                ></textarea>
+                <span className="text-[11px] text-slate-400 mt-1 block">Current length: {deleteReason.trim().length} / 10 required</span>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteModal(false)}
+                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition shadow-sm"
+                >
+                  Authorize Deletion
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}

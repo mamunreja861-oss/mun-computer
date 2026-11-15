@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 120" fill="none">
+  <defs>
+    <linearGradient id="munBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0052cc" />
+      <stop offset="100%" stop-color="#002b7f" />
+    </linearGradient>
+    <linearGradient id="munRedGrad" x1="0%" y1="50%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#ef4444" />
+    </linearGradient>
+  </defs>
+  <!-- Bold geometric royal-blue M pillar -->
+  <path
+    d="M52 104 L52 92 L62 92 L62 28 L50 28 L50 16 L92 16 L132 56 L172 16 L214 16 L214 28 L202 28 L202 92 L212 92 L212 104 L158 104 L158 92 L168 92 L168 52 L132 88 L96 52 L96 92 L106 92 L106 104 Z"
+    fill="url(#munBlueGrad)"
+  />
+  <!-- Dynamic red orbit swoosh -->
+  <path
+    d="M28 90 C52 104 118 86 162 50 C188 30 206 18 224 14 C210 26 196 40 174 60 C128 102 60 118 28 90 Z"
+    fill="url(#munRedGrad)"
+  />
+  <!-- White rounded cutout & laptop/tablet silhouette at center-bottom -->
+  <rect x="98" y="60" width="68" height="46" rx="7" fill="#ffffff" />
+  <rect x="108" y="65" width="48" height="30" rx="3" fill="#003893" />
+  <rect x="112" y="69" width="40" height="22" rx="1.5" fill="#e8f3ff" />
+  <path d="M101 98 L163 98 L170 104 L94 104 Z" fill="#003893" />
+  <rect x="126" y="100" width="12" height="2" rx="1" fill="#ffffff" />
+  <!-- Pixel burst squares top-right -->
+  <rect x="218" y="24" width="9" height="9" rx="1.5" fill="#0284c7" />
+  <rect x="230" y="16" width="10" height="10" rx="1.5" fill="#38bdf8" />
+  <rect x="233" y="29" width="9" height="9" rx="1.5" fill="#003893" />
+  <rect x="244" y="22" width="9" height="9" rx="1.5" fill="#dc2626" />
+  <rect x="248" y="10" width="8" height="8" rx="1.5" fill="#0ea5e9" />
+  <rect x="256" y="23" width="7" height="7" rx="1.5" fill="#ef4444" />
+</svg>
