@@ -740,6 +740,51 @@ class RelationalDatabaseService {
     if (!resetReqCols.has('reset_token_hash')) db.exec(`ALTER TABLE password_reset_requests ADD COLUMN reset_token_hash TEXT;`);
     if (!resetReqCols.has('reset_token_used_at')) db.exec(`ALTER TABLE password_reset_requests ADD COLUMN reset_token_used_at TEXT;`);
 
+    // Migration v4: Global Device Registration Policy (Max 3 Approved Devices) & Atomic Refresh Token Rotation
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS devices (
+        device_id TEXT PRIMARY KEY,
+        device_name TEXT,
+        user_agent TEXT,
+        platform TEXT,
+        requested_by_uid TEXT,
+        requested_role TEXT,
+        status TEXT NOT NULL CHECK(status IN ('PENDING', 'APPROVED', 'REVOKED', 'REJECTED')),
+        approved_by_uid TEXT,
+        approved_at TEXT,
+        revoked_by_uid TEXT,
+        revoked_at TEXT,
+        last_seen_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
+
+      CREATE TABLE IF NOT EXISTS refresh_tokens (
+        token_id TEXT PRIMARY KEY,
+        family_id TEXT NOT NULL,
+        session_id TEXT NOT NULL REFERENCES user_sessions(session_id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        generation INTEGER NOT NULL,
+        replaced_by_hash TEXT,
+        rotated_at TEXT,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_refresh_family ON refresh_tokens(family_id, generation);
+      CREATE INDEX IF NOT EXISTS idx_refresh_session ON refresh_tokens(session_id);
+      CREATE INDEX IF NOT EXISTS idx_refresh_device ON refresh_tokens(device_id);
+    `);
+
+    const sessionCols = new Set(
+      (db.prepare(`PRAGMA table_info(user_sessions)`).all() as Array<{ name: string }>).map(c => c.name)
+    );
+    if (!sessionCols.has('device_id')) db.exec(`ALTER TABLE user_sessions ADD COLUMN device_id TEXT;`);
+    if (!sessionCols.has('csrf_token_enc')) db.exec(`ALTER TABLE user_sessions ADD COLUMN csrf_token_enc TEXT;`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_user_device ON user_sessions(user_id, device_id);`);
+
     const applied = db.prepare(`SELECT 1 FROM schema_migrations WHERE version = 1`).get();
     if (!applied) {
       db.prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`)
@@ -754,6 +799,11 @@ class RelationalDatabaseService {
     if (!v3Applied) {
       db.prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`)
         .run(3, 'allow_admin_duplicate_mobile_aadhaar_exception', new Date().toISOString());
+    }
+    const v4Applied = db.prepare(`SELECT 1 FROM schema_migrations WHERE version = 4`).get();
+    if (!v4Applied) {
+      db.prepare(`INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)`)
+        .run(4, 'global_device_registration_and_atomic_refresh_rotation', new Date().toISOString());
     }
   }
 
@@ -1968,22 +2018,467 @@ class RelationalDatabaseService {
       .run(hash, new Date().toISOString(), userId);
   }
 
+  // -------------------------------------------------------------------------
+  // GLOBAL 3-DEVICE REGISTRATION POLICY & ATOMIC REFRESH TOKEN ROTATION
+  // -------------------------------------------------------------------------
+  countApprovedDevices(): number {
+    const row = this.getDb()
+      .prepare(`SELECT COUNT(*) AS cnt FROM devices WHERE status = 'APPROVED'`)
+      .get() as { cnt: number };
+    return Number(row?.cnt || 0);
+  }
+
+  getDevice(deviceId: string): {
+    deviceId: string;
+    deviceName: string;
+    userAgent: string;
+    platform: string;
+    requestedByUid: string;
+    requestedRole: string;
+    status: 'PENDING' | 'APPROVED' | 'REVOKED' | 'REJECTED';
+    approvedByUid: string | null;
+    approvedAt: string | null;
+    revokedByUid: string | null;
+    revokedAt: string | null;
+    lastSeenAt: string | null;
+    createdAt: string;
+  } | null {
+    const cleanId = String(deviceId || '').trim();
+    if (!cleanId) return null;
+    const row = this.getDb()
+      .prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`)
+      .get(cleanId) as any;
+    if (!row) return null;
+    return {
+      deviceId: row.device_id,
+      deviceName: row.device_name || 'Browser Workstation',
+      userAgent: row.user_agent || '',
+      platform: row.platform || '',
+      requestedByUid: row.requested_by_uid || '',
+      requestedRole: row.requested_role || 'STAFF',
+      status: row.status,
+      approvedByUid: row.approved_by_uid || null,
+      approvedAt: row.approved_at || null,
+      revokedByUid: row.revoked_by_uid || null,
+      revokedAt: row.revoked_at || null,
+      lastSeenAt: row.last_seen_at || null,
+      createdAt: row.created_at
+    };
+  }
+
+  listDevices() {
+    const rows = this.getDb()
+      .prepare(`
+        SELECT d.*,
+          (SELECT COUNT(*) FROM user_sessions s WHERE s.device_id = d.device_id AND s.revoked_at IS NULL AND s.expires_at > ?) AS active_sessions
+        FROM devices d
+        ORDER BY
+          CASE d.status WHEN 'PENDING' THEN 0 WHEN 'APPROVED' THEN 1 WHEN 'REVOKED' THEN 2 ELSE 3 END,
+          COALESCE(d.last_seen_at, d.created_at) DESC
+      `)
+      .all(new Date().toISOString()) as any[];
+    return rows.map((row) => ({
+      deviceId: row.device_id,
+      deviceName: row.device_name || 'Browser Workstation',
+      userAgent: row.user_agent || '',
+      platform: row.platform || '',
+      requestedByUid: row.requested_by_uid || '',
+      requestedRole: row.requested_role || 'STAFF',
+      status: row.status as 'PENDING' | 'APPROVED' | 'REVOKED' | 'REJECTED',
+      approvedByUid: row.approved_by_uid || null,
+      approvedAt: row.approved_at || null,
+      revokedByUid: row.revoked_by_uid || null,
+      revokedAt: row.revoked_at || null,
+      lastSeenAt: row.last_seen_at || null,
+      createdAt: row.created_at,
+      activeSessions: Number(row.active_sessions || 0)
+    }));
+  }
+
+  evaluateAndRegisterLoginDevice(params: {
+    deviceId: string;
+    deviceName?: string;
+    userAgent?: string;
+    platform?: string;
+    userId: string;
+    role: string;
+    isMainAdmin?: boolean;
+  }): {
+    allowed: boolean;
+    autoBootstrapped?: boolean;
+    code?: number;
+    errorCode?: 'DEVICE_ID_REQUIRED' | 'DEVICE_PENDING_APPROVAL' | 'DEVICE_LIMIT_REACHED' | 'DEVICE_REVOKED';
+    message?: string;
+    approvedCount?: number;
+    maxDevices: number;
+  } {
+    const MAX_APPROVED = 3;
+    const cleanId = String(params.deviceId || '').trim().slice(0, 128);
+    if (!cleanId) {
+      return {
+        allowed: false,
+        code: 400,
+        errorCode: 'DEVICE_ID_REQUIRED',
+        message: 'Device identifier is required to sign in.',
+        maxDevices: MAX_APPROVED
+      };
+    }
+
+    const cleanName = String(params.deviceName || 'Browser Workstation').trim().slice(0, 120) || 'Browser Workstation';
+    const cleanUa = String(params.userAgent || '').slice(0, 240);
+    const cleanPlat = String(params.platform || '').slice(0, 64);
+    const nowIso = new Date().toISOString();
+
+    type DeviceEvalResult = {
+      allowed: boolean;
+      autoBootstrapped?: boolean;
+      code?: number;
+      errorCode?: 'DEVICE_ID_REQUIRED' | 'DEVICE_PENDING_APPROVAL' | 'DEVICE_LIMIT_REACHED' | 'DEVICE_REVOKED';
+      message?: string;
+      approvedCount?: number;
+      maxDevices: number;
+    };
+    const txOutcome = this.runImmediateTransaction<{
+      result: DeviceEvalResult;
+      audit?: { eventType: string; description: string; actorUid: string; targetUid?: string };
+    }>(() => {
+      const db = this.getDb();
+      const existing = db.prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`).get(cleanId) as any;
+      const approvedCount = Number(
+        (db.prepare(`SELECT COUNT(*) AS cnt FROM devices WHERE status = 'APPROVED'`).get() as { cnt: number })?.cnt || 0
+      );
+
+      if (existing) {
+        if (existing.status === 'APPROVED') {
+          db.prepare(`
+            UPDATE devices SET
+              device_name = COALESCE(NULLIF(?, ''), device_name),
+              user_agent = ?,
+              platform = COALESCE(NULLIF(?, ''), platform),
+              last_seen_at = ?
+            WHERE device_id = ?
+          `).run(cleanName, cleanUa, cleanPlat, nowIso, cleanId);
+          return { result: { allowed: true, approvedCount, maxDevices: MAX_APPROVED } };
+        }
+        if (existing.status === 'REVOKED' || existing.status === 'REJECTED') {
+          return {
+            result: {
+              allowed: false,
+              code: 403,
+              errorCode: 'DEVICE_REVOKED',
+              message: 'This device has been revoked or rejected by Administration. Contact Main Admin to re-register or remove this device.',
+              approvedCount,
+              maxDevices: MAX_APPROVED
+            }
+          };
+        }
+        // PENDING device
+        if (approvedCount >= MAX_APPROVED) {
+          return {
+            result: {
+              allowed: false,
+              code: 403,
+              errorCode: 'DEVICE_LIMIT_REACHED',
+              message: `Global device limit reached (${approvedCount}/${MAX_APPROVED} approved devices active across Admin, Manager & Staff combined). Revoke or remove an existing device first.`,
+              approvedCount,
+              maxDevices: MAX_APPROVED
+            }
+          };
+        }
+        db.prepare(`
+          UPDATE devices SET
+            device_name = ?,
+            user_agent = ?,
+            platform = ?,
+            requested_by_uid = ?,
+            requested_role = ?,
+            last_seen_at = ?
+          WHERE device_id = ?
+        `).run(cleanName, cleanUa, cleanPlat, params.userId, params.role, nowIso, cleanId);
+        return {
+          result: {
+            allowed: false,
+            code: 403,
+            errorCode: 'DEVICE_PENDING_APPROVAL',
+            message: `Device registration (${cleanName}) is pending Administration approval (${approvedCount}/${MAX_APPROVED} slots used). Ask Admin to approve this device in Security Settings.`,
+            approvedCount,
+            maxDevices: MAX_APPROVED
+          }
+        };
+      }
+
+      // Brand-new device
+      if (approvedCount === 0 && (params.isMainAdmin || params.userId === MAIN_ADMIN_UID)) {
+        // Bootstrap initial Main Admin workstation cleanly so Admin can log in and approve up to 2 more devices
+        db.prepare(`
+          INSERT INTO devices (
+            device_id, device_name, user_agent, platform, requested_by_uid, requested_role,
+            status, approved_by_uid, approved_at, last_seen_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'APPROVED', ?, ?, ?, ?)
+        `).run(cleanId, cleanName, cleanUa, cleanPlat, params.userId, params.role, params.userId, nowIso, nowIso, nowIso);
+        return {
+          result: { allowed: true, autoBootstrapped: true, approvedCount: 1, maxDevices: MAX_APPROVED },
+          audit: {
+            eventType: 'DEVICE_AUTO_BOOTSTRAP',
+            description: `Bootstrapped initial approved Admin device ${cleanId} (${cleanName}) [1/${MAX_APPROVED}].`,
+            actorUid: params.userId,
+            targetUid: params.userId
+          }
+        };
+      }
+
+      // Record PENDING request so Admin can view it (or reject if limit full)
+      db.prepare(`
+        INSERT INTO devices (
+          device_id, device_name, user_agent, platform, requested_by_uid, requested_role,
+          status, last_seen_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+      `).run(cleanId, cleanName, cleanUa, cleanPlat, params.userId, params.role, nowIso, nowIso);
+
+      if (approvedCount >= MAX_APPROVED) {
+        return {
+          result: {
+            allowed: false,
+            code: 403,
+            errorCode: 'DEVICE_LIMIT_REACHED',
+            message: `Global device limit reached (${approvedCount}/${MAX_APPROVED} approved devices active across Admin, Manager & Staff combined). New device registration is blocked until Admin removes or revokes an existing device.`,
+            approvedCount,
+            maxDevices: MAX_APPROVED
+          },
+          audit: {
+            eventType: 'DEVICE_BLOCKED_LIMIT',
+            description: `Blocked 4th device ${cleanId} (${cleanName}) for ${params.userId}: global limit ${MAX_APPROVED}/${MAX_APPROVED} reached.`,
+            actorUid: params.userId,
+            targetUid: params.userId
+          }
+        };
+      }
+
+      return {
+        result: {
+          allowed: false,
+          code: 403,
+          errorCode: 'DEVICE_PENDING_APPROVAL',
+          message: `New device detected (${cleanName}). Admin approval is required before signing in (${approvedCount}/${MAX_APPROVED} approved devices active).`,
+          approvedCount,
+          maxDevices: MAX_APPROVED
+        },
+        audit: {
+          eventType: 'DEVICE_REQUESTED',
+          description: `Device ${cleanId} (${cleanName}) queued for Admin approval by ${params.userId} (${params.role}).`,
+          actorUid: params.userId,
+          targetUid: params.userId
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(txOutcome.audit.eventType, txOutcome.audit.description, txOutcome.audit.actorUid, txOutcome.audit.targetUid);
+    }
+    return txOutcome.result;
+  }
+
+  approveDevice(deviceId: string, actorUid: string): {
+    success: boolean;
+    code?: number;
+    errorCode?: string;
+    message: string;
+    approvedCount?: number;
+  } {
+    const MAX_APPROVED = 3;
+    const cleanId = String(deviceId || '').trim();
+    if (!cleanId) return { success: false, code: 400, message: 'Device ID is required.' };
+    const nowIso = new Date().toISOString();
+
+    const txOutcome = this.runImmediateTransaction(() => {
+      const db = this.getDb();
+      const target = db.prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`).get(cleanId) as any;
+      if (!target) return { result: { success: false, code: 404, message: 'Device record not found.' } };
+      if (target.status === 'APPROVED') {
+        return { result: { success: true, message: 'Device is already approved.', approvedCount: this.countApprovedDevices() } };
+      }
+
+      const approvedCount = Number(
+        (db.prepare(`SELECT COUNT(*) AS cnt FROM devices WHERE status = 'APPROVED'`).get() as { cnt: number })?.cnt || 0
+      );
+      if (approvedCount >= MAX_APPROVED) {
+        return {
+          result: {
+            success: false,
+            code: 403,
+            errorCode: 'DEVICE_LIMIT_REACHED',
+            approvedCount,
+            message: `Cannot approve device: Global limit of ${MAX_APPROVED} approved devices reached across Admin, Manager & Staff combined. Revoke or remove another device first.`
+          }
+        };
+      }
+
+      db.prepare(`
+        UPDATE devices SET
+          status = 'APPROVED',
+          approved_by_uid = ?,
+          approved_at = ?,
+          revoked_by_uid = NULL,
+          revoked_at = NULL
+        WHERE device_id = ?
+      `).run(actorUid, nowIso, cleanId);
+
+      return {
+        result: {
+          success: true,
+          message: `Device approved (${approvedCount + 1}/${MAX_APPROVED} global slots used).`,
+          approvedCount: approvedCount + 1
+        },
+        audit: {
+          eventType: 'DEVICE_APPROVED',
+          description: `Approved device ${cleanId} (${target.device_name || ''}) by ${actorUid} [${approvedCount + 1}/${MAX_APPROVED}].`,
+          actorUid,
+          targetUid: target.requested_by_uid || undefined
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(txOutcome.audit.eventType, txOutcome.audit.description, txOutcome.audit.actorUid, txOutcome.audit.targetUid);
+    }
+    return txOutcome.result;
+  }
+
+  rejectDevice(deviceId: string, actorUid: string): { success: boolean; code?: number; message: string } {
+    const cleanId = String(deviceId || '').trim();
+    if (!cleanId) return { success: false, code: 400, message: 'Device ID is required.' };
+    const nowIso = new Date().toISOString();
+
+    const txOutcome = this.runImmediateTransaction(() => {
+      const db = this.getDb();
+      const target = db.prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`).get(cleanId) as any;
+      if (!target) return { result: { success: false, code: 404, message: 'Device record not found.' } };
+
+      db.prepare(`
+        UPDATE devices SET status = 'REJECTED', revoked_by_uid = ?, revoked_at = ? WHERE device_id = ?
+      `).run(actorUid, nowIso, cleanId);
+      db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL`).run(nowIso, cleanId);
+      db.prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL`).run(nowIso, cleanId);
+
+      return {
+        result: { success: true, message: 'Device registration rejected.' },
+        audit: {
+          eventType: 'DEVICE_REJECTED',
+          description: `Rejected device ${cleanId} (${target.device_name || ''}) by ${actorUid}.`,
+          actorUid,
+          targetUid: target.requested_by_uid || undefined
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(txOutcome.audit.eventType, txOutcome.audit.description, txOutcome.audit.actorUid, txOutcome.audit.targetUid);
+    }
+    return txOutcome.result;
+  }
+
+  revokeDevice(deviceId: string, actorUid: string): { success: boolean; code?: number; message: string } {
+    const cleanId = String(deviceId || '').trim();
+    if (!cleanId) return { success: false, code: 400, message: 'Device ID is required.' };
+    const nowIso = new Date().toISOString();
+
+    const txOutcome = this.runImmediateTransaction(() => {
+      const db = this.getDb();
+      const target = db.prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`).get(cleanId) as any;
+      if (!target) return { result: { success: false, code: 404, message: 'Device record not found.' } };
+
+      db.prepare(`
+        UPDATE devices SET status = 'REVOKED', revoked_by_uid = ?, revoked_at = ? WHERE device_id = ?
+      `).run(actorUid, nowIso, cleanId);
+      // Strictly revoke ONLY sessions & refresh tokens bound to this specific device_id
+      db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL`).run(nowIso, cleanId);
+      db.prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL`).run(nowIso, cleanId);
+
+      return {
+        result: { success: true, message: 'Device revoked. All active sessions on this device were signed out without affecting other devices.' },
+        audit: {
+          eventType: 'DEVICE_REVOKED',
+          description: `Revoked device ${cleanId} (${target.device_name || ''}) by ${actorUid}. Only this device's sessions were invalidated.`,
+          actorUid,
+          targetUid: target.requested_by_uid || undefined
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(txOutcome.audit.eventType, txOutcome.audit.description, txOutcome.audit.actorUid, txOutcome.audit.targetUid);
+    }
+    return txOutcome.result;
+  }
+
+  deleteDevice(deviceId: string, actorUid: string): { success: boolean; code?: number; message: string } {
+    const cleanId = String(deviceId || '').trim();
+    if (!cleanId) return { success: false, code: 400, message: 'Device ID is required.' };
+    const nowIso = new Date().toISOString();
+
+    const txOutcome = this.runImmediateTransaction(() => {
+      const db = this.getDb();
+      const target = db.prepare(`SELECT * FROM devices WHERE device_id = ? LIMIT 1`).get(cleanId) as any;
+      if (!target) return { result: { success: false, code: 404, message: 'Device record not found.' } };
+
+      db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE device_id = ? AND revoked_at IS NULL`).run(nowIso, cleanId);
+      db.prepare(`DELETE FROM refresh_tokens WHERE device_id = ?`).run(cleanId);
+      db.prepare(`DELETE FROM devices WHERE device_id = ?`).run(cleanId);
+
+      return {
+        result: { success: true, message: 'Device removed and global approval slot freed.' },
+        audit: {
+          eventType: 'DEVICE_REMOVED',
+          description: `Removed device ${cleanId} (${target.device_name || ''}) by ${actorUid}. Slot freed.`,
+          actorUid,
+          targetUid: target.requested_by_uid || undefined
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(txOutcome.audit.eventType, txOutcome.audit.description, txOutcome.audit.actorUid, txOutcome.audit.targetUid);
+    }
+    return txOutcome.result;
+  }
+
   createSessionRecord(params: {
     userId: string;
     sessionToken: string;
     panelRole: string;
+    deviceId?: string;
+    sessionId?: string;
     ipAddress?: string;
     userAgent?: string;
-  }): { sessionId: string; csrfToken: string; expiresAt: string } {
+  }): {
+    sessionId: string;
+    csrfToken: string;
+    expiresAt: string;
+    refreshToken: string;
+    refreshExpiresAt: string;
+    familyId: string;
+    generation: number;
+  } {
     const db = this.getDb();
     const now = new Date();
     const nowIso = now.toISOString();
     const timeoutMins = Math.max(15, Number(this.getSetting('session_timeout_minutes') || 720));
-    const expiresAt = new Date(now.getTime() + timeoutMins * 60 * 1000).toISOString();
-    const sessionId = `SES-${crypto.randomBytes(12).toString('hex')}`;
+    // Session horizon spans at least 30 days (or configured timeout) so short-lived 15m access tokens rotate cleanly
+    const refreshTtlMs = Math.max(timeoutMins * 60 * 1000, 30 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(now.getTime() + refreshTtlMs).toISOString();
+    const refreshExpiresAt = expiresAt;
+
+    const sessionId = params.sessionId || `SES-${crypto.randomBytes(12).toString('hex')}`;
+    const familyId = `FAM-${crypto.randomBytes(10).toString('hex')}`;
     const csrfToken = crypto.randomBytes(24).toString('base64url');
     const tokenHash = hashSensitive(params.sessionToken);
     const csrfTokenHash = hashSensitive(csrfToken);
+    const csrfTokenEnc = encryptSensitive(csrfToken);
+    const cleanDeviceId = String(params.deviceId || '').trim() || `LEGACY-${crypto.randomBytes(6).toString('hex')}`;
+
+    const refreshToken = `MUNR_${crypto.randomBytes(40).toString('base64url')}`;
+    const refreshHash = hashSensitive(refreshToken);
+    const refreshTokenId = `RT-${crypto.randomBytes(10).toString('hex')}`;
 
     this.runImmediateTransaction(() => {
       db.prepare(`
@@ -1999,62 +2494,120 @@ class RelationalDatabaseService {
 
       db.prepare(`
         INSERT INTO user_sessions (
-          session_id, user_id, token_hash, csrf_token_hash, panel_role, ip_address, user_agent, created_at, expires_at, revoked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          session_id, user_id, token_hash, csrf_token_hash, csrf_token_enc, device_id, panel_role, ip_address, user_agent, created_at, expires_at, revoked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
       `).run(
         sessionId,
         params.userId,
         tokenHash,
         csrfTokenHash,
+        csrfTokenEnc,
+        cleanDeviceId,
         params.panelRole,
         params.ipAddress || '',
         String(params.userAgent || '').slice(0, 240),
         nowIso,
         expiresAt
       );
+
+      db.prepare(`
+        INSERT INTO refresh_tokens (
+          token_id, family_id, session_id, user_id, device_id, token_hash, generation, replaced_by_hash, rotated_at, expires_at, revoked_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL, NULL, ?, NULL, ?)
+      `).run(
+        refreshTokenId,
+        familyId,
+        sessionId,
+        params.userId,
+        cleanDeviceId,
+        refreshHash,
+        refreshExpiresAt,
+        nowIso
+      );
     });
 
-    return { sessionId, csrfToken, expiresAt };
+    return { sessionId, csrfToken, expiresAt, refreshToken, refreshExpiresAt, familyId, generation: 1 };
   }
 
-  validateActiveSessionToken(rawSessionToken: string): {
+  validateActiveSessionToken(
+    rawSessionToken: string,
+    sessionIdFromToken?: string,
+    deviceIdFromToken?: string
+  ): {
     valid: boolean;
+    errorCode?: 'SESSION_REVOKED' | 'SESSION_EXPIRED' | 'DEVICE_REVOKED';
     sessionId?: string;
     userId?: string;
+    deviceId?: string;
     csrfTokenHash?: string;
     reason?: string;
   } {
-    const tokenHash = hashSensitive(rawSessionToken);
-    const row = this.getDb()
-      .prepare(`SELECT session_id, user_id, csrf_token_hash, expires_at, revoked_at FROM user_sessions WHERE token_hash = ? LIMIT 1`)
-      .get(tokenHash) as {
-        session_id: string;
-        user_id: string;
-        csrf_token_hash: string;
-        expires_at: string;
-        revoked_at: string | null;
-      } | undefined;
+    const db = this.getDb();
+    let row:
+      | {
+          session_id: string;
+          user_id: string;
+          csrf_token_hash: string;
+          device_id: string | null;
+          expires_at: string;
+          revoked_at: string | null;
+        }
+      | undefined;
+
+    if (sessionIdFromToken) {
+      row = db
+        .prepare(`SELECT session_id, user_id, csrf_token_hash, device_id, expires_at, revoked_at FROM user_sessions WHERE session_id = ? LIMIT 1`)
+        .get(sessionIdFromToken) as any;
+    }
+    if (!row && rawSessionToken) {
+      const tokenHash = hashSensitive(rawSessionToken);
+      row = db
+        .prepare(`SELECT session_id, user_id, csrf_token_hash, device_id, expires_at, revoked_at FROM user_sessions WHERE token_hash = ? LIMIT 1`)
+        .get(tokenHash) as any;
+    }
 
     if (!row) {
-      return { valid: false, reason: 'Session record not found or signed out.' };
+      return { valid: false, errorCode: 'SESSION_REVOKED', reason: 'Session record not found or signed out.' };
     }
+
+    const boundDeviceId = row.device_id || deviceIdFromToken || '';
+    if (boundDeviceId && !boundDeviceId.startsWith('LEGACY-')) {
+      const dev = db.prepare(`SELECT status FROM devices WHERE device_id = ? LIMIT 1`).get(boundDeviceId) as { status: string } | undefined;
+      if (!dev || dev.status !== 'APPROVED') {
+        return {
+          valid: false,
+          errorCode: 'DEVICE_REVOKED',
+          reason: 'This device is no longer approved or has been revoked by Administration.'
+        };
+      }
+      if (deviceIdFromToken && row.device_id && deviceIdFromToken !== row.device_id) {
+        return {
+          valid: false,
+          errorCode: 'DEVICE_REVOKED',
+          reason: 'Session token does not match current device identity.'
+        };
+      }
+    }
+
     if (row.revoked_at) {
-      return { valid: false, reason: 'Session has been revoked.' };
+      return { valid: false, errorCode: 'SESSION_REVOKED', reason: 'Session has been revoked.' };
     }
     if (Date.parse(row.expires_at) <= Date.now()) {
-      return { valid: false, reason: 'Session expired.' };
+      return { valid: false, errorCode: 'SESSION_EXPIRED', reason: 'Session expired.' };
     }
+
     return {
       valid: true,
       sessionId: row.session_id,
       userId: row.user_id,
+      deviceId: row.device_id || undefined,
       csrfTokenHash: row.csrf_token_hash
     };
   }
 
-  verifySessionCsrfToken(sessionToken: string, providedCsrfToken: string): boolean {
+  verifySessionCsrfToken(sessionToken: string, providedCsrfToken: string, sessionIdFromToken?: string, deviceIdFromToken?: string): boolean {
     if (!sessionToken || !providedCsrfToken) return false;
-    const sess = this.validateActiveSessionToken(sessionToken);
+    const sess = this.validateActiveSessionToken(sessionToken, sessionIdFromToken, deviceIdFromToken);
     if (!sess.valid || !sess.csrfTokenHash) return false;
     const providedHash = hashSensitive(providedCsrfToken);
     const a = Buffer.from(providedHash);
@@ -2062,12 +2615,285 @@ class RelationalDatabaseService {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   }
 
-  revokeSessionByToken(rawSessionToken: string): void {
-    if (!rawSessionToken) return;
-    const tokenHash = hashSensitive(rawSessionToken);
-    this.getDb()
-      .prepare(`UPDATE user_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL`)
-      .run(new Date().toISOString(), tokenHash);
+  rotateRefreshTokenAtomic(params: {
+    rawRefreshToken: string;
+    deviceId?: string;
+    ipAddress?: string;
+    userAgent?: string;
+    issueAccessTokenFn: (args: {
+      uid: string;
+      role: string;
+      isSuperAdmin: boolean;
+      sessionVersion: number;
+      sessionId: string;
+      deviceId: string;
+    }) => { token: string; expiresAt: string };
+  }): {
+    success: boolean;
+    code?: number;
+    errorCode?: 'REFRESH_INVALID' | 'SESSION_REVOKED' | 'SESSION_EXPIRED' | 'DEVICE_REVOKED' | 'ACCOUNT_INACTIVE';
+    message?: string;
+    user?: ApiUserRecord;
+    sessionToken?: string;
+    refreshToken?: string;
+    alreadyRotatedInGrace?: boolean;
+    csrfToken?: string;
+    expiresAt?: string;
+    refreshExpiresAt?: string;
+    sessionId?: string;
+    deviceId?: string;
+    generation?: number;
+  } {
+    const raw = String(params.rawRefreshToken || '').trim();
+    if (!raw) {
+      return { success: false, code: 401, errorCode: 'REFRESH_INVALID', message: 'Refresh token missing.' };
+    }
+    const tokenHash = hashSensitive(raw);
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const clientDeviceId = String(params.deviceId || '').trim();
+
+    type RotateResult = {
+      success: boolean;
+      code?: number;
+      errorCode?: 'REFRESH_INVALID' | 'SESSION_REVOKED' | 'SESSION_EXPIRED' | 'DEVICE_REVOKED' | 'ACCOUNT_INACTIVE';
+      message?: string;
+      user?: ApiUserRecord;
+      sessionToken?: string;
+      refreshToken?: string;
+      alreadyRotatedInGrace?: boolean;
+      csrfToken?: string;
+      expiresAt?: string;
+      refreshExpiresAt?: string;
+      sessionId?: string;
+      deviceId?: string;
+      generation?: number;
+    };
+    const txOutcome = this.runImmediateTransaction<{
+      result: RotateResult;
+      audit?: {
+        eventType: string;
+        description: string;
+        actorUid: string;
+        targetUid?: string;
+        metadata?: Record<string, unknown>;
+        ipAddress?: string;
+      };
+    }>(() => {
+      const db = this.getDb();
+      const rt = db.prepare(`SELECT * FROM refresh_tokens WHERE token_hash = ? LIMIT 1`).get(tokenHash) as any;
+      if (!rt) {
+        return { result: { success: false, code: 401, errorCode: 'REFRESH_INVALID', message: 'Invalid refresh token.' } };
+      }
+
+      if (clientDeviceId && rt.device_id && clientDeviceId !== rt.device_id) {
+        return { result: { success: false, code: 403, errorCode: 'DEVICE_REVOKED', message: 'Device mismatch on refresh token.' } };
+      }
+
+      const sess = db.prepare(`SELECT * FROM user_sessions WHERE session_id = ? LIMIT 1`).get(rt.session_id) as any;
+      if (!sess || sess.revoked_at) {
+        return { result: { success: false, code: 401, errorCode: 'SESSION_REVOKED', message: 'Session has been signed out or revoked.' } };
+      }
+      if (Date.parse(sess.expires_at) <= Date.now()) {
+        return { result: { success: false, code: 401, errorCode: 'SESSION_EXPIRED', message: 'Session expired. Please sign in again.' } };
+      }
+
+      if (rt.device_id && !String(rt.device_id).startsWith('LEGACY-')) {
+        const dev = db.prepare(`SELECT status FROM devices WHERE device_id = ? LIMIT 1`).get(rt.device_id) as { status: string } | undefined;
+        if (!dev || dev.status !== 'APPROVED') {
+          return {
+            result: {
+              success: false,
+              code: 403,
+              errorCode: 'DEVICE_REVOKED',
+              message: 'This device is no longer approved or has been revoked.'
+            }
+          };
+        }
+      }
+
+      const user = this.getUserByUid(rt.user_id);
+      if (!user || user.status !== 'ACTIVE') {
+        return { result: { success: false, code: 403, errorCode: 'ACCOUNT_INACTIVE', message: 'User account is unavailable.' } };
+      }
+      if (user.lockedUntil && Date.parse(user.lockedUntil) > Date.now()) {
+        return { result: { success: false, code: 429, errorCode: 'ACCOUNT_INACTIVE', message: 'Account is temporarily locked.' } };
+      }
+
+      if (rt.revoked_at) {
+        return { result: { success: false, code: 401, errorCode: 'SESSION_REVOKED', message: 'Refresh token revoked.' } };
+      }
+      if (Date.parse(rt.expires_at) <= Date.now()) {
+        return { result: { success: false, code: 401, errorCode: 'SESSION_EXPIRED', message: 'Refresh token expired. Please sign in again.' } };
+      }
+
+      let csrfToken = '';
+      if (sess.csrf_token_enc) {
+        try {
+          csrfToken = decryptSensitive(sess.csrf_token_enc);
+        } catch {
+          csrfToken = '';
+        }
+      }
+      if (!csrfToken) {
+        csrfToken = crypto.randomBytes(24).toString('base64url');
+        db.prepare(`UPDATE user_sessions SET csrf_token_hash = ?, csrf_token_enc = ? WHERE session_id = ?`)
+          .run(hashSensitive(csrfToken), encryptSensitive(csrfToken), sess.session_id);
+      }
+
+      // Concurrent multi-tab race handling: if already rotated inside 15-second grace window,
+      // do NOT revoke session and do NOT overwrite newer refresh cookie with an older token!
+      if (rt.replaced_by_hash) {
+        const rotatedAtMs = rt.rotated_at ? Date.parse(rt.rotated_at) : 0;
+        const elapsedMs = Date.now() - rotatedAtMs;
+        const latestActive = db
+          .prepare(`
+            SELECT generation, expires_at FROM refresh_tokens
+            WHERE family_id = ? AND session_id = ? AND replaced_by_hash IS NULL AND revoked_at IS NULL
+            ORDER BY generation DESC LIMIT 1
+          `)
+          .get(rt.family_id, rt.session_id) as { generation: number; expires_at: string } | undefined;
+
+        if (elapsedMs >= 0 && elapsedMs <= 15000 && latestActive && Date.parse(latestActive.expires_at) > Date.now()) {
+          const issued = params.issueAccessTokenFn({
+            uid: user.uid,
+            role: user.role,
+            isSuperAdmin: user.isMainAdmin,
+            sessionVersion: user.sessionVersion || 1,
+            sessionId: sess.session_id,
+            deviceId: rt.device_id
+          });
+          db.prepare(`UPDATE devices SET last_seen_at = ? WHERE device_id = ?`).run(nowIso, rt.device_id);
+          return {
+            result: {
+              success: true,
+              alreadyRotatedInGrace: true,
+              user,
+              sessionToken: issued.token,
+              csrfToken,
+              expiresAt: issued.expiresAt,
+              refreshExpiresAt: latestActive.expires_at,
+              sessionId: sess.session_id,
+              deviceId: rt.device_id,
+              generation: Number(latestActive.generation)
+            }
+          };
+        }
+
+        // Reuse outside grace window: revoke ONLY this family & session (keep user's other devices active)
+        db.prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL`).run(nowIso, rt.family_id);
+        db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`).run(nowIso, sess.session_id);
+        return {
+          result: {
+            success: false,
+            code: 401,
+            errorCode: 'SESSION_REVOKED',
+            message: 'Session refresh token already rotated or revoked. Please sign in again.'
+          },
+          audit: {
+            eventType: 'AUTH_REFRESH_REUSE_DETECTED',
+            description: `Detected stale refresh token reuse on family ${rt.family_id} (device ${rt.device_id}). Revoked only that session.`,
+            actorUid: user.uid,
+            targetUid: user.uid,
+            metadata: { deviceId: rt.device_id, familyId: rt.family_id },
+            ipAddress: params.ipAddress
+          }
+        };
+      }
+
+      // Normal atomic rotation
+      const newRefreshToken = `MUNR_${crypto.randomBytes(40).toString('base64url')}`;
+      const newRefreshHash = hashSensitive(newRefreshToken);
+      const newTokenId = `RT-${crypto.randomBytes(10).toString('hex')}`;
+      const newGeneration = Number(rt.generation || 1) + 1;
+
+      const upd = db
+        .prepare(`UPDATE refresh_tokens SET replaced_by_hash = ?, rotated_at = ? WHERE token_id = ? AND replaced_by_hash IS NULL`)
+        .run(newRefreshHash, nowIso, rt.token_id);
+
+      if (Number(upd.changes) !== 1) {
+        return { result: { success: false, code: 401, errorCode: 'SESSION_REVOKED', message: 'Concurrent refresh conflict.' } };
+      }
+
+      db.prepare(`
+        INSERT INTO refresh_tokens (
+          token_id, family_id, session_id, user_id, device_id, token_hash, generation, replaced_by_hash, rotated_at, expires_at, revoked_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)
+      `).run(
+        newTokenId,
+        rt.family_id,
+        sess.session_id,
+        user.uid,
+        rt.device_id,
+        newRefreshHash,
+        newGeneration,
+        sess.expires_at,
+        nowIso
+      );
+
+      const issued = params.issueAccessTokenFn({
+        uid: user.uid,
+        role: user.role,
+        isSuperAdmin: user.isMainAdmin,
+        sessionVersion: user.sessionVersion || 1,
+        sessionId: sess.session_id,
+        deviceId: rt.device_id
+      });
+
+      db.prepare(`UPDATE user_sessions SET ip_address = COALESCE(NULLIF(?, ''), ip_address), user_agent = COALESCE(NULLIF(?, ''), user_agent) WHERE session_id = ?`)
+        .run(params.ipAddress || '', String(params.userAgent || '').slice(0, 240), sess.session_id);
+      db.prepare(`UPDATE devices SET last_seen_at = ? WHERE device_id = ?`).run(nowIso, rt.device_id);
+
+      return {
+        result: {
+          success: true,
+          alreadyRotatedInGrace: false,
+          user,
+          sessionToken: issued.token,
+          refreshToken: newRefreshToken,
+          csrfToken,
+          expiresAt: issued.expiresAt,
+          refreshExpiresAt: sess.expires_at,
+          sessionId: sess.session_id,
+          deviceId: rt.device_id,
+          generation: newGeneration
+        }
+      };
+    });
+
+    if (txOutcome.audit) {
+      this.logAudit(
+        txOutcome.audit.eventType,
+        txOutcome.audit.description,
+        txOutcome.audit.actorUid,
+        txOutcome.audit.targetUid,
+        txOutcome.audit.metadata,
+        txOutcome.audit.ipAddress
+      );
+    }
+    return txOutcome.result;
+  }
+
+  revokeSessionByToken(rawSessionToken: string, sessionIdFromToken?: string, rawRefreshToken?: string): void {
+    const nowIso = new Date().toISOString();
+    const db = this.getDb();
+    this.runImmediateTransaction(() => {
+      let targetSessionId = sessionIdFromToken || '';
+      if (!targetSessionId && rawSessionToken) {
+        const tokenHash = hashSensitive(rawSessionToken);
+        const r = db.prepare(`SELECT session_id FROM user_sessions WHERE token_hash = ? LIMIT 1`).get(tokenHash) as { session_id: string } | undefined;
+        if (r?.session_id) targetSessionId = r.session_id;
+      }
+      if (!targetSessionId && rawRefreshToken) {
+        const rtHash = hashSensitive(rawRefreshToken);
+        const r = db.prepare(`SELECT session_id FROM refresh_tokens WHERE token_hash = ? LIMIT 1`).get(rtHash) as { session_id: string } | undefined;
+        if (r?.session_id) targetSessionId = r.session_id;
+      }
+      if (targetSessionId) {
+        db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`).run(nowIso, targetSessionId);
+        db.prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL`).run(nowIso, targetSessionId);
+      }
+    });
   }
 
   revokeAllSessionsForUser(userId: string): void {
@@ -2075,6 +2901,7 @@ class RelationalDatabaseService {
     this.runImmediateTransaction(() => {
       this.getDb().prepare(`UPDATE users SET session_version = session_version + 1, updated_at = ? WHERE user_id = ?`).run(nowIso, userId);
       this.getDb().prepare(`UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(nowIso, userId);
+      this.getDb().prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(nowIso, userId);
     });
   }
 
@@ -2213,6 +3040,7 @@ class RelationalDatabaseService {
       `).run(hash, nowIso, todayIst, nextDailyCount, JSON.stringify(pwdHist), nowIso, userId);
 
       db.prepare(`UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(nowIso, userId);
+      db.prepare(`UPDATE refresh_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL`).run(nowIso, userId);
     });
 
     this.logAudit('PASSWORD_CHANGE', `User ${row.full_name} (${userId}) updated password securely.`, userId, userId);

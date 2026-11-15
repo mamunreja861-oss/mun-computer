@@ -3,6 +3,8 @@
  * MUN COMPUTER BUSINESS MANAGER - Official Business ERP
  */
 
+import { getOrCreateDeviceIdentity } from './authCoordinator.js';
+
 const STORAGE_PREFIX = 'MUN_COMPUTER_ERP_v1_';
 
 export const KEYS = {
@@ -587,11 +589,14 @@ export function getAuthHeaders() {
   const cur = getItem(KEYS.CURRENT_USER, null);
   const token = localStorage.getItem('MUN_COMPUTER_SESSION_TOKEN') || '';
   const csrf = localStorage.getItem('MUN_COMPUTER_CSRF_TOKEN') || '';
+  const { deviceId, deviceName } = getOrCreateDeviceIdentity();
   const headers = { 'Content-Type': 'application/json' };
   if (cur?.uid || cur?.id) headers['x-actor-uid'] = cur.uid || cur.id;
   if (cur?.role) headers['x-actor-role'] = cur.role;
   if (token) headers['x-session-token'] = token;
   if (csrf) headers['x-csrf-token'] = csrf;
+  if (deviceId) headers['x-device-id'] = deviceId;
+  if (deviceName) headers['x-device-name'] = deviceName;
   return headers;
 }
 
@@ -1010,15 +1015,7 @@ export function initializeStorage() {
     setItem(KEYS.INVENTORY, []);
   }
   if (!getItem(KEYS.INVENTORY_CATEGORIES)) {
-    const nowIso = new Date().toISOString();
-    setItem(KEYS.INVENTORY_CATEGORIES, [
-      { id: 'CAT-GAS-01', name: 'Gas Hose Pipe', isDefault: true, createdAt: nowIso },
-      { id: 'CAT-GAS-02', name: 'Gas Lighter', isDefault: true, createdAt: nowIso },
-      { id: 'CAT-GAS-03', name: 'Gas Regulator', isDefault: true, createdAt: nowIso },
-      { id: 'CAT-GAS-04', name: 'Gas Oven / Stove', isDefault: true, createdAt: nowIso },
-      { id: 'CAT-GAS-05', name: 'Gas Spare Parts & Fittings', isDefault: true, createdAt: nowIso },
-      { id: 'CAT-GAS-06', name: 'Other Gas Accessories', isDefault: true, createdAt: nowIso }
-    ]);
+    setItem(KEYS.INVENTORY_CATEGORIES, []);
   }
   if (!getItem(KEYS.DAYBOOK)) {
     setItem(KEYS.DAYBOOK, []);

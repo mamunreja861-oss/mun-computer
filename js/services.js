@@ -174,7 +174,6 @@ export const SERVICE_CATALOG = {
 export const SERVICE_CATEGORIES = Object.keys(SERVICE_CATALOG);
 
 const RATE_CHART_STORAGE_KEY = 'mun_service_rate_chart_v1';
-const RATE_CHART_META_STORAGE_KEY = 'mun_service_rate_chart_meta_v1';
 let _rateChartInitializer = null;
 
 export function registerRateChartInitializer(fn) {
@@ -324,53 +323,13 @@ export function getBaseServiceCatalog() {
 
 function getLiveRateChartMasterItems(includeInactive = false) {
   let list = getItem(RATE_CHART_STORAGE_KEY, null);
-  const meta = getItem(RATE_CHART_META_STORAGE_KEY, null);
-  if (!Array.isArray(list) || (list.length === 0 && !meta?.seeded)) {
+  if (!Array.isArray(list)) {
     if (typeof _rateChartInitializer === 'function') {
       list = _rateChartInitializer();
     }
   }
   if (!Array.isArray(list)) {
-    // Fallback when rateChart.js has not registered yet (read-only synthesis from base seeds)
-    const fallback = [];
-    const seen = new Set();
-    getBaseUnifiedServiceList().forEach((s, idx) => {
-      const k = `${s.category}::${s.name}`.toLowerCase();
-      if (seen.has(k)) return;
-      seen.add(k);
-      fallback.push({
-        id: `RATE-UNI-${String(idx + 1).padStart(3, '0')}`,
-        category: s.category || 'Online Form Fill-up',
-        serviceName: s.name,
-        nameBn: s.nameBn || '',
-        unit: s.unit || 'Per Application',
-        serviceCharge: s.isCustom ? (Number(s.defaultCharge) || 0) : 0,
-        govFee: s.isCustom ? (Number(s.defaultGovFee) || 0) : 0,
-        isActive: true,
-        isCustom: Boolean(s.isCustom),
-        remarks: s.remarks || ''
-      });
-    });
-    let catIdx = 1;
-    Object.entries(getBaseServiceCatalog()).forEach(([cat, subs]) => {
-      (subs || []).forEach(sub => {
-        const k = `${cat}::${sub}`.toLowerCase();
-        if (seen.has(k)) return;
-        seen.add(k);
-        fallback.push({
-          id: `RATE-CAT-${String(catIdx++).padStart(3, '0')}`,
-          category: cat,
-          serviceName: sub,
-          nameBn: '',
-          unit: 'Per Application',
-          serviceCharge: 0,
-          govFee: 0,
-          isActive: true,
-          remarks: ''
-        });
-      });
-    });
-    list = fallback;
+    return [];
   }
   return list.filter(item => item && item.serviceName && (includeInactive || item.isActive !== false));
 }

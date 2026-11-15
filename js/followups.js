@@ -251,44 +251,14 @@ export function isFinalCaseStatus(status) {
    ========================================================================= */
 
 function ensureLocalSeedsPopulated() {
-  let opts = getItem(KEYS.ADMIN_OPTIONS, []);
-  if (!Array.isArray(opts) || opts.length === 0) {
-    const nowIso = new Date().toISOString();
-    const counters = {};
-    opts = DEFAULT_ADMIN_OPTION_SEEDS.map((s, idx) => {
-      counters[s.category] = (counters[s.category] || 0) + 1;
-      return {
-        id: `OPT-${s.category.toUpperCase()}-${String(counters[s.category]).padStart(3, '0')}`,
-        category: s.category,
-        label: s.label,
-        sortOrder: idx + 1,
-        isActive: true,
-        isDeleted: false,
-        isDefault: true,
-        meta: s.meta || {},
-        createdAt: nowIso,
-        updatedAt: nowIso
-      };
-    });
-    setItem(KEYS.ADMIN_OPTIONS, opts);
+  const opts = getItem(KEYS.ADMIN_OPTIONS, null);
+  if (!Array.isArray(opts)) {
+    setItem(KEYS.ADMIN_OPTIONS, []);
   }
 
-  let sched = getItem(KEYS.FOLLOWUP_SCHEDULE, []);
-  if (!Array.isArray(sched) || sched.length === 0) {
-    const nowIso = new Date().toISOString();
-    sched = DEFAULT_FOLLOWUP_SCHEDULE_SEEDS.map((m, idx) => ({
-      id: `SCH-DAY-${m.day}`,
-      day: m.day,
-      title: m.title,
-      description: m.description,
-      sortOrder: idx + 1,
-      isActive: true,
-      isDeleted: false,
-      isDefault: true,
-      createdAt: nowIso,
-      updatedAt: nowIso
-    }));
-    setItem(KEYS.FOLLOWUP_SCHEDULE, sched);
+  const sched = getItem(KEYS.FOLLOWUP_SCHEDULE, null);
+  if (!Array.isArray(sched)) {
+    setItem(KEYS.FOLLOWUP_SCHEDULE, []);
   }
 }
 

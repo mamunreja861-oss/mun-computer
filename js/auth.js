@@ -4,6 +4,20 @@
  */
 
 import { getItem, setItem, KEYS, logAuditAction, getAuthHeaders } from './storage.js';
+import {
+  getOrCreateDeviceIdentity,
+  commitAuthTokens,
+  commitAuthenticatedUserCache,
+  broadcastLocalLogout,
+  refreshAccessTokenSingleFlight,
+  installAuthFetchInterceptor,
+  isTerminalAuthErrorCode,
+  resetSharedActivity
+} from './authCoordinator.js';
+
+if (typeof window !== 'undefined') {
+  installAuthFetchInterceptor();
+}
 
 export const ROLES = {
   ADMIN: 'ADMIN',
@@ -350,9 +364,21 @@ export function isSuperAdmin(user = null) {
 }
 
 export function handleSessionInvalidationResponse(status, data) {
-  if (status === 401 && data && typeof data.message === 'string' && /session|expired|invalidated/i.test(data.message)) {
-    logout();
-    window.dispatchEvent(new CustomEvent('mun-auth-logout'));
+  const errCode = String(data?.errorCode || '').trim().toUpperCase();
+  // Never force logout on transient errors or recoverable ACCESS_TOKEN_EXPIRED (handled by fetch interceptor)
+  if (errCode === 'ACCESS_TOKEN_EXPIRED') {
+    return false;
+  }
+  const isTerminalCode = isTerminalAuthErrorCode(errCode);
+  const isExplicitSessionTermination =
+    isTerminalCode ||
+    (status === 401 && data && typeof data.message === 'string' && /revoked|device.*removed|account.*inactive/i.test(data.message));
+
+  if (isExplicitSessionTermination) {
+    logout({
+      skipServer: true,
+      reason: data?.message || 'Your session expired or was revoked. Please sign in again.'
+    });
     return true;
   }
   return false;
@@ -701,21 +727,25 @@ export function getCashOperationLimit(user = null) {
 export async function refreshSessionPermissions() {
   const token = localStorage.getItem('MUN_COMPUTER_SESSION_TOKEN') || '';
   const active = getCurrentUser();
-  if (!token || !active) return null;
+  if (!active) return null;
+  if (!token) {
+    const rr = await refreshAccessTokenSingleFlight({ force: false });
+    if (!rr.ok) return null;
+  }
   try {
     const resp = await fetch('/api/auth/session', {
       headers: getAuthHeaders()
     });
-    const data = await resp.json();
-    if (resp.ok && data.authenticated && data.user) {
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && (data.success || data.authenticated) && data.user) {
       setCurrentUser({ ...active, ...data.user });
       return data.user;
     }
-    if (resp.status === 401 || data.authenticated === false) {
-      handleSessionInvalidationResponse(401, { message: data.message || 'Session expired' });
+    if (resp.status === 401 || resp.status === 403) {
+      handleSessionInvalidationResponse(resp.status, data);
     }
   } catch {
-    // offline or transient failure
+    // offline or transient failure: keep current authenticated state
   }
   return null;
 }
@@ -823,20 +853,28 @@ export async function authenticateAsync(uid, password, panelRole = 'STAFF', capt
   }
 
   try {
+    const { deviceId, deviceName, platform } = getOrCreateDeviceIdentity();
     const resp = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid: cleanUid, password: inputPass, panelRole, captchaToken, captchaInput })
+      headers: {
+        'Content-Type': 'application/json',
+        'x-device-id': deviceId,
+        'x-device-name': deviceName
+      },
+      body: JSON.stringify({
+        uid: cleanUid,
+        password: inputPass,
+        panelRole,
+        captchaToken,
+        captchaInput,
+        deviceId,
+        deviceName,
+        platform
+      })
     });
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
 
     if (resp.ok && data.success) {
-      if (data.sessionToken) {
-        localStorage.setItem('MUN_COMPUTER_SESSION_TOKEN', data.sessionToken);
-      }
-      if (data.csrfToken) {
-        localStorage.setItem('MUN_COMPUTER_CSRF_TOKEN', data.csrfToken);
-      }
       if (data.mfaRequired) {
         return {
           success: true,
@@ -846,7 +884,18 @@ export async function authenticateAsync(uid, password, panelRole = 'STAFF', capt
           message: data.message
         };
       }
+      commitAuthTokens({
+        sessionToken: data.sessionToken,
+        csrfToken: data.csrfToken,
+        sessionId: data.sessionId || '',
+        deviceId: data.deviceId || deviceId,
+        generation: data.generation || 1,
+        expiresAt: data.expiresAt || '',
+        sessionExpiresAt: data.sessionExpiresAt || ''
+      });
       setCurrentUser(data.user);
+      commitAuthenticatedUserCache(data.user);
+      resetSharedActivity();
       const users = getItem(KEYS.USERS, []);
       const idx = users.findIndex(u => (u.uid || u.id) === data.user.uid);
       if (idx !== -1) {
@@ -865,6 +914,7 @@ export async function authenticateAsync(uid, password, panelRole = 'STAFF', capt
     }
     return {
       success: false,
+      errorCode: data.errorCode || '',
       message: data.message || 'Authentication failed. Please check your credentials.'
     };
   } catch {
@@ -880,24 +930,39 @@ export async function authenticateAsync(uid, password, panelRole = 'STAFF', capt
  */
 export async function changePasswordAsync(uid, currentPassword, newPassword, confirmPassword) {
   try {
+    const { deviceId, deviceName, platform } = getOrCreateDeviceIdentity();
     const resp = await fetch('/api/auth/change-password', {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify({ uid, currentPassword, newPassword, confirmPassword })
+      body: JSON.stringify({
+        uid,
+        currentPassword,
+        newPassword,
+        confirmPassword,
+        deviceId,
+        deviceName,
+        platform
+      })
     });
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
 
     if (resp.ok && data.success) {
       if (data.sessionToken) {
-        localStorage.setItem('MUN_COMPUTER_SESSION_TOKEN', data.sessionToken);
-      }
-      if (data.csrfToken) {
-        localStorage.setItem('MUN_COMPUTER_CSRF_TOKEN', data.csrfToken);
+        commitAuthTokens({
+          sessionToken: data.sessionToken,
+          csrfToken: data.csrfToken,
+          sessionId: data.sessionId || '',
+          deviceId: data.deviceId || deviceId,
+          generation: data.generation || 1,
+          expiresAt: data.expiresAt || '',
+          sessionExpiresAt: data.sessionExpiresAt || ''
+        });
       }
       const active = getCurrentUser();
       if (active && (active.uid === uid || active.id === uid)) {
         const merged = data.user ? { ...active, ...data.user, mustChangePassword: false } : { ...active, mustChangePassword: false };
         setCurrentUser(merged);
+        commitAuthenticatedUserCache(merged);
       }
       return {
         success: true,
@@ -921,16 +986,19 @@ export async function changePasswordAsync(uid, currentPassword, newPassword, con
 }
 
 /**
- * Log out active session, revoke backend SQLite token & clean credentials
+ * Log out active session, revoke ONLY this device's backend SQLite session & sync tabs on same device
  */
-export function logout() {
+export function logout(options = {}) {
+  const opts = typeof options === 'object' && options ? options : {};
   const user = getCurrentUser();
   const token = localStorage.getItem('MUN_COMPUTER_SESSION_TOKEN') || '';
-  if (token) {
+  if (!opts.skipServer && token) {
     try {
       fetch('/api/auth/logout', {
         method: 'POST',
+        credentials: 'include',
         headers: getAuthHeaders(),
+        body: JSON.stringify({ sessionToken: token }),
         keepalive: true
       }).catch(() => {});
     } catch {
@@ -940,8 +1008,5 @@ export function logout() {
   if (user) {
     logAuditAction('AUTH_LOGOUT', `User ${user.name} (${user.uid || user.id}) logged out from MUN COMPUTER`, user);
   }
-  localStorage.removeItem('MUN_COMPUTER_SESSION_TOKEN');
-  localStorage.removeItem('MUN_COMPUTER_CSRF_TOKEN');
-  setItem(KEYS.CURRENT_USER, { isLoggedOut: true });
-  localStorage.removeItem(KEYS.CURRENT_USER);
+  broadcastLocalLogout(opts.reason || 'Signed out successfully. Enter your credentials to sign in again.');
 }

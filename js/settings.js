@@ -518,6 +518,86 @@ export async function disableMainAdminMfa() {
   }
 }
 
+export async function fetchRegisteredDevices() {
+  try {
+    const resp = await fetch('/api/devices', { headers: getActorHeaders() });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.status === 401 || resp.status === 403) {
+      handleSessionInvalidationResponse(resp.status, data);
+    }
+    if (resp.ok && data.success) {
+      return {
+        success: true,
+        devices: Array.isArray(data.devices) ? data.devices : [],
+        approvedCount: Number(data.approvedCount || 0),
+        maxDevices: Number(data.maxDevices || 3)
+      };
+    }
+    return { success: false, message: data.message || 'Failed to load registered devices.', devices: [] };
+  } catch {
+    return { success: false, message: 'Server unreachable while loading devices.', devices: [] };
+  }
+}
+
+export async function approveRegisteredDevice(deviceId) {
+  try {
+    const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/approve`, {
+      method: 'POST',
+      headers: getActorHeaders(),
+      body: JSON.stringify({})
+    });
+    const data = await resp.json().catch(() => ({}));
+    handleSessionInvalidationResponse(resp.status, data);
+    return { ok: resp.ok, ...data };
+  } catch {
+    return { success: false, message: 'Server unreachable while approving device.' };
+  }
+}
+
+export async function rejectRegisteredDevice(deviceId) {
+  try {
+    const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/reject`, {
+      method: 'POST',
+      headers: getActorHeaders(),
+      body: JSON.stringify({})
+    });
+    const data = await resp.json().catch(() => ({}));
+    handleSessionInvalidationResponse(resp.status, data);
+    return { ok: resp.ok, ...data };
+  } catch {
+    return { success: false, message: 'Server unreachable while rejecting device.' };
+  }
+}
+
+export async function revokeRegisteredDevice(deviceId) {
+  try {
+    const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, {
+      method: 'POST',
+      headers: getActorHeaders(),
+      body: JSON.stringify({})
+    });
+    const data = await resp.json().catch(() => ({}));
+    handleSessionInvalidationResponse(resp.status, data);
+    return { ok: resp.ok, ...data };
+  } catch {
+    return { success: false, message: 'Server unreachable while revoking device.' };
+  }
+}
+
+export async function deleteRegisteredDevice(deviceId) {
+  try {
+    const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+      method: 'DELETE',
+      headers: getActorHeaders()
+    });
+    const data = await resp.json().catch(() => ({}));
+    handleSessionInvalidationResponse(resp.status, data);
+    return { ok: resp.ok, ...data };
+  } catch {
+    return { success: false, message: 'Server unreachable while removing device.' };
+  }
+}
+
 export function downloadBackupFile() {
   const backupJson = exportDatabaseBackup();
   const blob = new Blob([backupJson], { type: 'application/json' });

@@ -9,8 +9,11 @@ import { murshidabadMaster } from './server/murshidabadMaster.js';
 import {
   centralDb,
   maskPhone,
+  issueAccessToken,
   issueSessionToken,
+  verifyAccessTokenDetailed,
   verifySessionToken,
+  DEFAULT_ACCESS_TOKEN_TTL_MS,
   generateCaptchaChallenge,
   verifyCaptchaChallenge,
   issueForgotStepToken,
@@ -54,6 +57,73 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
+const APP_VERSION: string = (() => {
+  try {
+    const pkgPath = path.resolve(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return String(pkg?.version || '1.0.0');
+  } catch {
+    return '1.0.0';
+  }
+})();
+
+const REFRESH_COOKIE_NAME = 'mun_refresh_token';
+
+function parseCookies(req: Request): Record<string, string> {
+  const raw = String(req.headers.cookie || '');
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx <= 0) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function isHttpsRequest(req: Request): boolean {
+  if (req.secure) return true;
+  const fwd = String(req.headers['x-forwarded-proto'] || '').toLowerCase();
+  return fwd.includes('https');
+}
+
+function setRefreshCookie(res: Response, req: Request, token: string, expiresAtIso: string): void {
+  const maxAgeSec = Math.max(60, Math.floor((Date.parse(expiresAtIso) - Date.now()) / 1000));
+  const attrs = [
+    `${REFRESH_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    'HttpOnly',
+    'Path=/api/auth',
+    `Max-Age=${maxAgeSec}`,
+    isHttpsRequest(req) ? 'SameSite=None; Secure' : 'SameSite=Lax'
+  ];
+  res.setHeader('Set-Cookie', attrs.join('; '));
+}
+
+function clearRefreshCookie(res: Response, req: Request): void {
+  const attrs = [
+    `${REFRESH_COOKIE_NAME}=`,
+    'HttpOnly',
+    'Path=/api/auth',
+    'Max-Age=0',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+    isHttpsRequest(req) ? 'SameSite=None; Secure' : 'SameSite=Lax'
+  ];
+  res.setHeader('Set-Cookie', attrs.join('; '));
+}
+
+function extractDeviceMeta(req: Request): { deviceId: string; deviceName: string; platform: string } {
+  const deviceId = String(req.headers['x-device-id'] || req.body?.deviceId || '').trim().slice(0, 128);
+  const deviceName = String(req.headers['x-device-name'] || req.body?.deviceName || '').trim().slice(0, 120);
+  const platform = String(req.body?.platform || req.headers['sec-ch-ua-platform'] || '').replace(/"/g, '').trim().slice(0, 64);
+  return { deviceId, deviceName, platform };
+}
+
 // Security Headers (compatible with AI Studio iframe preview)
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -68,6 +138,7 @@ app.use(express.json({ limit: '10mb' }));
 // CSRF Validation Middleware on authenticated mutating requests
 const CSRF_EXEMPT_PATHS = new Set<string>([
   '/api/auth/login',
+  '/api/auth/refresh',
   '/api/auth/mfa/verify-login',
   '/api/auth/logout',
   '/api/auth/forgot/initiate',
@@ -83,11 +154,27 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 
   const sessionToken = String(req.headers['x-session-token'] || '').trim();
   if (sessionToken) {
+    const tokenCheck = verifyAccessTokenDetailed(sessionToken);
+    if (!tokenCheck.valid && tokenCheck.expired) {
+      return res.status(401).json({
+        success: false,
+        errorCode: 'ACCESS_TOKEN_EXPIRED',
+        message: 'Access token expired. Refreshing session...'
+      });
+    }
+    if (!tokenCheck.valid || !tokenCheck.payload) {
+      return res.status(401).json({
+        success: false,
+        errorCode: 'TOKEN_INVALID',
+        message: 'Invalid authentication token.'
+      });
+    }
     const csrfToken = String(req.headers['x-csrf-token'] || '').trim();
-    if (!relationalDb.verifySessionCsrfToken(sessionToken, csrfToken)) {
+    if (!relationalDb.verifySessionCsrfToken(sessionToken, csrfToken, tokenCheck.payload.sid, tokenCheck.payload.did)) {
       return res.status(403).json({
         success: false,
         csrfError: true,
+        errorCode: 'CSRF_INVALID',
         message: 'Security validation failed: Missing or invalid CSRF token. Please refresh or sign in again.'
       });
     }
@@ -215,51 +302,77 @@ function loadUsers(): ApiUserRecord[] {
 // ---------------------------------------------------------------------------
 // ACTOR VERIFICATION (Session Token against SQLite user_sessions + User Status)
 // ---------------------------------------------------------------------------
-function resolveActor(req: Request, requireSignedToken = false): { ok: boolean; actor?: UserRecord; error?: string; code?: number } {
+function resolveActor(
+  req: Request,
+  requireSignedToken = false
+): { ok: boolean; actor?: UserRecord; error?: string; errorCode?: string; code?: number; sessionId?: string; deviceId?: string } {
   const queryToken = typeof req.query?.token === 'string' ? req.query.token.trim() : '';
   const token = String(req.headers['x-session-token'] || queryToken || '').trim();
   const headerUid = String(req.headers['x-actor-uid'] || req.body?.actorUid || '').trim().toUpperCase();
+  const headerDeviceId = String(req.headers['x-device-id'] || '').trim();
 
   if (requireSignedToken && !token) {
-    return { ok: false, code: 401, error: 'Authentication session token required. Please sign in again.' };
+    return { ok: false, code: 401, errorCode: 'AUTH_REQUIRED', error: 'Authentication session token required. Please sign in again.' };
   }
 
   let targetUid = headerUid;
   let tokenSv: number | undefined;
+  let resolvedSid: string | undefined;
+  let resolvedDid: string | undefined;
   if (token) {
-    const verified = verifySessionToken(token);
-    if (!verified) {
-      return { ok: false, code: 401, error: 'Session expired or invalid. Please sign in again.' };
+    const detailed = verifyAccessTokenDetailed(token);
+    if (!detailed.valid || !detailed.payload) {
+      if (detailed.expired) {
+        return { ok: false, code: 401, errorCode: 'ACCESS_TOKEN_EXPIRED', error: 'Access token expired. Please refresh session.' };
+      }
+      return { ok: false, code: 401, errorCode: 'TOKEN_INVALID', error: 'Session token invalid. Please sign in again.' };
     }
-    const dbSess = relationalDb.validateActiveSessionToken(token);
+    const verified = detailed.payload;
+    if (headerDeviceId && verified.did && headerDeviceId !== verified.did) {
+      return { ok: false, code: 403, errorCode: 'DEVICE_REVOKED', error: 'Device mismatch detected. Please sign in again.' };
+    }
+    const dbSess = relationalDb.validateActiveSessionToken(token, verified.sid, verified.did);
     if (!dbSess.valid) {
-      return { ok: false, code: 401, error: dbSess.reason || 'Session has been revoked. Please sign in again.' };
+      const code = dbSess.errorCode === 'DEVICE_REVOKED' ? 403 : 401;
+      return {
+        ok: false,
+        code,
+        errorCode: dbSess.errorCode || 'SESSION_REVOKED',
+        error: dbSess.reason || 'Session has been revoked. Please sign in again.'
+      };
     }
     targetUid = verified.uid.toUpperCase();
     tokenSv = verified.sv;
+    resolvedSid = dbSess.sessionId;
+    resolvedDid = dbSess.deviceId || verified.did;
   }
 
   if (!targetUid) {
-    return { ok: false, code: 401, error: 'Authentication required: Actor User ID missing.' };
+    return { ok: false, code: 401, errorCode: 'AUTH_REQUIRED', error: 'Authentication required: Actor User ID missing.' };
   }
 
   const actor = relationalDb.getUserByUid(targetUid);
   if (!actor) {
-    return { ok: false, code: 401, error: 'Invalid actor account.' };
+    return { ok: false, code: 401, errorCode: 'SESSION_REVOKED', error: 'Invalid actor account.' };
   }
   if (actor.status !== 'ACTIVE') {
-    return { ok: false, code: 403, error: `Account is currently ${actor.status}. Access denied.` };
+    return { ok: false, code: 403, errorCode: 'ACCOUNT_INACTIVE', error: `Account is currently ${actor.status}. Access denied.` };
   }
   if (token && tokenSv !== undefined && tokenSv !== (actor.sessionVersion || 1)) {
-    return { ok: false, code: 401, error: 'Session invalidated due to password change or administrative action. Please sign in again.' };
+    return {
+      ok: false,
+      code: 401,
+      errorCode: 'SESSION_REVOKED',
+      error: 'Session invalidated due to password change or administrative action. Please sign in again.'
+    };
   }
   if (actor.lockedUntil && Date.parse(actor.lockedUntil) > Date.now()) {
-    return { ok: false, code: 429, error: 'Account is temporarily locked due to suspicious attempts.' };
+    return { ok: false, code: 429, errorCode: 'ACCOUNT_LOCKED', error: 'Account is temporarily locked due to suspicious attempts.' };
   }
-  return { ok: true, actor };
+  return { ok: true, actor, sessionId: resolvedSid, deviceId: resolvedDid };
 }
 
-function verifyMainAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; code?: number } {
+function verifyMainAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; errorCode?: string; code?: number } {
   const resolved = resolveActor(req, true);
   if (!resolved.ok || !resolved.actor) return resolved;
   const actor = resolved.actor;
@@ -267,28 +380,29 @@ function verifyMainAdminActor(req: Request): { ok: boolean; actor?: UserRecord; 
     return {
       ok: false,
       code: 403,
+      errorCode: 'PERMISSION_DENIED',
       error: `ACCESS DENIED: Exclusive Main Administration (${MAIN_ADMIN_UID}) master control required.`
     };
   }
   return { ok: true, actor };
 }
 
-function verifyAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; code?: number } {
+function verifyAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; errorCode?: string; code?: number } {
   const resolved = resolveActor(req, true);
   if (!resolved.ok || !resolved.actor) return resolved;
   const actor = resolved.actor;
   if (actor.role !== 'ADMIN' && actor.uid !== MAIN_ADMIN_UID && !actor.isMainAdmin) {
-    return { ok: false, code: 403, error: `ACCESS DENIED: Administration role required.` };
+    return { ok: false, code: 403, errorCode: 'PERMISSION_DENIED', error: `ACCESS DENIED: Administration role required.` };
   }
   return { ok: true, actor };
 }
 
-function verifyManagerOrAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; code?: number } {
+function verifyManagerOrAdminActor(req: Request): { ok: boolean; actor?: UserRecord; error?: string; errorCode?: string; code?: number } {
   const resolved = resolveActor(req, true);
   if (!resolved.ok || !resolved.actor) return resolved;
   const actor = resolved.actor;
   if (!['ADMIN', 'MANAGER'].includes(actor.role) && actor.uid !== MAIN_ADMIN_UID && !actor.isMainAdmin) {
-    return { ok: false, code: 403, error: `ACCESS DENIED: Manager or Administration role required.` };
+    return { ok: false, code: 403, errorCode: 'PERMISSION_DENIED', error: `ACCESS DENIED: Manager or Administration role required.` };
   }
   return { ok: true, actor };
 }
@@ -504,6 +618,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     status: 'ONLINE',
     app: 'MUN COMPUTER — CORPORATE ERP SYSTEM',
+    version: APP_VERSION,
     mainAdminUid: MAIN_ADMIN_UID,
     smsConfigured: isSmsGatewayConfigured(),
     year: new Date().getFullYear(),
@@ -560,19 +675,92 @@ app.get('/api/auth/captcha', (_req, res) => {
 app.get('/api/auth/session', (req, res) => {
   const resolved = resolveActor(req, true);
   if (!resolved.ok || !resolved.actor) {
-    return res.status(resolved.code || 401).json({ success: false, message: resolved.error || 'Session invalid.' });
+    return res.status(resolved.code || 401).json({
+      success: false,
+      errorCode: resolved.errorCode || 'SESSION_INVALID',
+      message: resolved.error || 'Session invalid.'
+    });
   }
-  res.json({ success: true, user: sanitizeUserForResponse(resolved.actor, true) });
+  res.json({
+    success: true,
+    sessionId: resolved.sessionId,
+    deviceId: resolved.deviceId,
+    user: sanitizeUserForResponse(resolved.actor, true)
+  });
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const cookies = parseCookies(req);
+  const rawRefreshToken = String(cookies[REFRESH_COOKIE_NAME] || req.body?.refreshToken || '').trim();
+  const { deviceId } = extractDeviceMeta(req);
+
+  const result = relationalDb.rotateRefreshTokenAtomic({
+    rawRefreshToken,
+    deviceId,
+    ipAddress: req.ip,
+    userAgent: String(req.headers['user-agent'] || ''),
+    issueAccessTokenFn: (args) => {
+      const expiresAt = new Date(Date.now() + DEFAULT_ACCESS_TOKEN_TTL_MS).toISOString();
+      const token = issueAccessToken({
+        uid: args.uid,
+        role: args.role,
+        isSuperAdmin: args.isSuperAdmin,
+        sessionVersion: args.sessionVersion,
+        sessionId: args.sessionId,
+        deviceId: args.deviceId,
+        ttlMs: DEFAULT_ACCESS_TOKEN_TTL_MS
+      });
+      return { token, expiresAt };
+    }
+  });
+
+  if (!result.success || !result.user || !result.sessionToken) {
+    if (result.errorCode === 'SESSION_REVOKED' || result.errorCode === 'SESSION_EXPIRED' || result.errorCode === 'DEVICE_REVOKED' || result.errorCode === 'REFRESH_INVALID') {
+      clearRefreshCookie(res, req);
+    }
+    return res.status(result.code || 401).json({
+      success: false,
+      errorCode: result.errorCode || 'REFRESH_INVALID',
+      message: result.message || 'Unable to refresh session.'
+    });
+  }
+
+  // Only emit Set-Cookie on fresh rotation so concurrent grace-window responses never overwrite a newer cookie
+  if (!result.alreadyRotatedInGrace && result.refreshToken && result.refreshExpiresAt) {
+    setRefreshCookie(res, req, result.refreshToken, result.refreshExpiresAt);
+  }
+
+  res.json({
+    success: true,
+    sessionToken: result.sessionToken,
+    csrfToken: result.csrfToken,
+    expiresAt: result.expiresAt,
+    sessionExpiresAt: result.refreshExpiresAt,
+    sessionId: result.sessionId,
+    deviceId: result.deviceId,
+    generation: result.generation,
+    alreadyRotatedInGrace: Boolean(result.alreadyRotatedInGrace),
+    user: sanitizeUserForResponse(result.user, true)
+  });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   const token = String(req.headers['x-session-token'] || req.body?.sessionToken || '').trim();
-  if (token) {
-    relationalDb.revokeSessionByToken(token);
-  }
-  const resolved = token ? verifySessionToken(token) : null;
-  if (resolved?.uid) {
-    relationalDb.logAudit('AUTH_LOGOUT', `User ${resolved.uid} signed out safely.`, resolved.uid, resolved.uid, undefined, req.ip);
+  const cookies = parseCookies(req);
+  const rawRefresh = String(cookies[REFRESH_COOKIE_NAME] || '').trim();
+  const detailed = token ? verifyAccessTokenDetailed(token) : null;
+  const sid = detailed?.payload?.sid;
+  relationalDb.revokeSessionByToken(token, sid, rawRefresh);
+  clearRefreshCookie(res, req);
+  if (detailed?.payload?.uid) {
+    relationalDb.logAudit(
+      'AUTH_LOGOUT',
+      `User ${detailed.payload.uid} signed out safely from device ${detailed.payload.did || 'browser'}.`,
+      detailed.payload.uid,
+      detailed.payload.uid,
+      { deviceId: detailed.payload.did, sessionId: sid },
+      req.ip
+    );
   }
   res.json({ success: true, message: 'Signed out cleanly.' });
 });
@@ -722,29 +910,61 @@ app.post('/api/auth/login', async (req, res) => {
     }
   }
 
-  const sessionToken = issueSessionToken({
+  // Global 3-Device Registration Policy check (Admin + Manager + Staff combined)
+  const devMeta = extractDeviceMeta(req);
+  const deviceId = devMeta.deviceId || `DEV-HDR-${hashSensitive(String(req.headers['user-agent'] || req.ip || 'unknown')).slice(0, 16)}`;
+  const devEval = relationalDb.evaluateAndRegisterLoginDevice({
+    deviceId,
+    deviceName: devMeta.deviceName || 'Browser Workstation',
+    userAgent: String(req.headers['user-agent'] || ''),
+    platform: devMeta.platform,
+    userId: row.user_id,
+    role: row.role_id,
+    isMainAdmin: row.is_main_admin === 1
+  });
+  if (!devEval.allowed) {
+    return res.status(devEval.code || 403).json({
+      success: false,
+      errorCode: devEval.errorCode,
+      deviceId,
+      approvedCount: devEval.approvedCount,
+      maxDevices: devEval.maxDevices,
+      message: devEval.message
+    });
+  }
+
+  const sessionId = `SES-${crypto.randomBytes(12).toString('hex')}`;
+  const accessExpiresAt = new Date(Date.now() + DEFAULT_ACCESS_TOKEN_TTL_MS).toISOString();
+  const sessionToken = issueAccessToken({
     uid: row.user_id,
     role: row.role_id,
     isSuperAdmin: row.is_main_admin === 1,
-    sessionVersion: row.session_version || 1
+    sessionVersion: row.session_version || 1,
+    sessionId,
+    deviceId,
+    ttlMs: DEFAULT_ACCESS_TOKEN_TTL_MS
   });
 
   const sess = relationalDb.createSessionRecord({
     userId: row.user_id,
     sessionToken,
     panelRole: panelNormalized,
+    deviceId,
+    sessionId,
     ipAddress: req.ip,
     userAgent: String(req.headers['user-agent'] || '')
   });
+
+  setRefreshCookie(res, req, sess.refreshToken, sess.refreshExpiresAt);
 
   const hydratedUser = relationalDb.getUserByUid(row.user_id)!;
 
   relationalDb.logAudit(
     'AUTH_LOGIN',
-    `User ${hydratedUser.fullName} (${hydratedUser.uid} - ${hydratedUser.role}) signed in via ${panelNormalized} panel.`,
+    `User ${hydratedUser.fullName} (${hydratedUser.uid} - ${hydratedUser.role}) signed in via ${panelNormalized} panel on device ${deviceId}.`,
     hydratedUser.uid,
     hydratedUser.uid,
-    { panel: panelNormalized, role: hydratedUser.role, userName: hydratedUser.fullName },
+    { panel: panelNormalized, role: hydratedUser.role, userName: hydratedUser.fullName, deviceId },
     req.ip
   );
 
@@ -756,7 +976,11 @@ app.post('/api/auth/login', async (req, res) => {
     user: sanitizeUserForResponse(hydratedUser, true),
     sessionToken,
     csrfToken: sess.csrfToken,
-    expiresAt: sess.expiresAt,
+    expiresAt: accessExpiresAt,
+    sessionExpiresAt: sess.expiresAt,
+    sessionId: sess.sessionId,
+    deviceId,
+    generation: sess.generation,
     mustChangePassword: hydratedUser.mustChangePassword
   });
 });
@@ -779,26 +1003,57 @@ app.post('/api/auth/mfa/verify-login', (req, res) => {
     return res.status(401).json({ success: false, message: 'Invalid 6-digit authenticator code.' });
   }
 
-  const sessionToken = issueSessionToken({
+  const devMeta = extractDeviceMeta(req);
+  const deviceId = devMeta.deviceId || `DEV-HDR-${hashSensitive(String(req.headers['user-agent'] || req.ip || 'unknown')).slice(0, 16)}`;
+  const devEval = relationalDb.evaluateAndRegisterLoginDevice({
+    deviceId,
+    deviceName: devMeta.deviceName || 'Browser Workstation',
+    userAgent: String(req.headers['user-agent'] || ''),
+    platform: devMeta.platform,
+    userId: user.uid,
+    role: user.role,
+    isMainAdmin: user.isMainAdmin
+  });
+  if (!devEval.allowed) {
+    return res.status(devEval.code || 403).json({
+      success: false,
+      errorCode: devEval.errorCode,
+      deviceId,
+      approvedCount: devEval.approvedCount,
+      maxDevices: devEval.maxDevices,
+      message: devEval.message
+    });
+  }
+
+  const sessionId = `SES-${crypto.randomBytes(12).toString('hex')}`;
+  const accessExpiresAt = new Date(Date.now() + DEFAULT_ACCESS_TOKEN_TTL_MS).toISOString();
+  const sessionToken = issueAccessToken({
     uid: user.uid,
     role: user.role,
     isSuperAdmin: user.isMainAdmin,
-    sessionVersion: user.sessionVersion || 1
+    sessionVersion: user.sessionVersion || 1,
+    sessionId,
+    deviceId,
+    ttlMs: DEFAULT_ACCESS_TOKEN_TTL_MS
   });
   const sess = relationalDb.createSessionRecord({
     userId: user.uid,
     sessionToken,
     panelRole: pending.panelRole,
+    deviceId,
+    sessionId,
     ipAddress: req.ip,
     userAgent: String(req.headers['user-agent'] || '')
   });
 
+  setRefreshCookie(res, req, sess.refreshToken, sess.refreshExpiresAt);
+
   relationalDb.logAudit(
     'AUTH_LOGIN',
-    `Main Administration ${user.uid} completed TOTP MFA login via ${pending.panelRole} panel.`,
+    `Main Administration ${user.uid} completed TOTP MFA login via ${pending.panelRole} panel on device ${deviceId}.`,
     user.uid,
     user.uid,
-    { mfa: true, panel: pending.panelRole },
+    { mfa: true, panel: pending.panelRole, deviceId },
     req.ip
   );
 
@@ -808,7 +1063,11 @@ app.post('/api/auth/mfa/verify-login', (req, res) => {
     user: sanitizeUserForResponse(user, true),
     sessionToken,
     csrfToken: sess.csrfToken,
-    expiresAt: sess.expiresAt,
+    expiresAt: accessExpiresAt,
+    sessionExpiresAt: sess.expiresAt,
+    sessionId: sess.sessionId,
+    deviceId,
+    generation: sess.generation,
     mustChangePassword: user.mustChangePassword
   });
 });
@@ -898,19 +1157,29 @@ app.post('/api/auth/change-password', async (req, res) => {
   }
 
   const updated = await relationalDb.changeOwnPassword(row.user_id, String(newPassword), todayIst, 'USER_PASSWORD_CHANGE');
-  const sessionToken = issueSessionToken({
+  const devMeta = extractDeviceMeta(req);
+  const deviceId = devMeta.deviceId || `DEV-HDR-${hashSensitive(String(req.headers['user-agent'] || req.ip || 'unknown')).slice(0, 16)}`;
+  const sessionId = `SES-${crypto.randomBytes(12).toString('hex')}`;
+  const accessExpiresAt = new Date(Date.now() + DEFAULT_ACCESS_TOKEN_TTL_MS).toISOString();
+  const sessionToken = issueAccessToken({
     uid: updated.user.uid,
     role: updated.user.role,
     isSuperAdmin: updated.user.isMainAdmin,
-    sessionVersion: updated.user.sessionVersion || 1
+    sessionVersion: updated.user.sessionVersion || 1,
+    sessionId,
+    deviceId,
+    ttlMs: DEFAULT_ACCESS_TOKEN_TTL_MS
   });
   const sess = relationalDb.createSessionRecord({
     userId: updated.user.uid,
     sessionToken,
     panelRole: row.role_id,
+    deviceId,
+    sessionId,
     ipAddress: req.ip,
     userAgent: String(req.headers['user-agent'] || '')
   });
+  setRefreshCookie(res, req, sess.refreshToken, sess.refreshExpiresAt);
 
   const remainingToday = isMainAdminAccount ? 999999 : Math.max(0, updated.dailyLimit - updated.dailyChangesUsed);
   res.json({
@@ -921,7 +1190,11 @@ app.post('/api/auth/change-password', async (req, res) => {
     user: sanitizeUserForResponse(updated.user, true),
     sessionToken,
     csrfToken: sess.csrfToken,
-    expiresAt: sess.expiresAt,
+    expiresAt: accessExpiresAt,
+    sessionExpiresAt: sess.expiresAt,
+    sessionId: sess.sessionId,
+    deviceId,
+    generation: sess.generation,
     dailyLimit: updated.dailyLimit,
     dailyChangesUsed: updated.dailyChangesUsed,
     remainingChangesToday: remainingToday,
@@ -1633,6 +1906,79 @@ app.delete('/api/users/:id', (req, res) => {
     return res.status(result.code || 400).json({ success: false, message: result.message });
   }
   res.json({ success: true, message: result.message });
+});
+
+// ---------------------------------------------------------------------------
+// GLOBAL 3-DEVICE APPROVAL & REVOCATION POLICY API (ADMINISTRATION ONLY)
+// ---------------------------------------------------------------------------
+app.get('/api/devices', (req, res) => {
+  const auth = verifyAdminActor(req);
+  if (!auth.ok || !auth.actor) {
+    return res.status(auth.code || 403).json({
+      success: false,
+      errorCode: auth.errorCode,
+      message: auth.error || 'ACCESS DENIED: Administration access required.'
+    });
+  }
+  const devices = relationalDb.listDevices();
+  const approvedCount = devices.filter(d => d.status === 'APPROVED').length;
+  res.json({ success: true, devices, approvedCount, maxDevices: 3 });
+});
+
+app.post('/api/devices/:deviceId/approve', (req, res) => {
+  const auth = verifyAdminActor(req);
+  if (!auth.ok || !auth.actor) {
+    return res.status(auth.code || 403).json({
+      success: false,
+      errorCode: auth.errorCode,
+      message: auth.error || 'ACCESS DENIED: Administration access required.'
+    });
+  }
+  const result = relationalDb.approveDevice(String(req.params.deviceId || ''), auth.actor.uid);
+  if (!result.success) return res.status(result.code || 400).json(result);
+  res.json({ ...result, devices: relationalDb.listDevices(), maxDevices: 3 });
+});
+
+app.post('/api/devices/:deviceId/reject', (req, res) => {
+  const auth = verifyAdminActor(req);
+  if (!auth.ok || !auth.actor) {
+    return res.status(auth.code || 403).json({
+      success: false,
+      errorCode: auth.errorCode,
+      message: auth.error || 'ACCESS DENIED: Administration access required.'
+    });
+  }
+  const result = relationalDb.rejectDevice(String(req.params.deviceId || ''), auth.actor.uid);
+  if (!result.success) return res.status(result.code || 400).json(result);
+  res.json({ ...result, devices: relationalDb.listDevices(), approvedCount: relationalDb.countApprovedDevices(), maxDevices: 3 });
+});
+
+app.post('/api/devices/:deviceId/revoke', (req, res) => {
+  const auth = verifyAdminActor(req);
+  if (!auth.ok || !auth.actor) {
+    return res.status(auth.code || 403).json({
+      success: false,
+      errorCode: auth.errorCode,
+      message: auth.error || 'ACCESS DENIED: Administration access required.'
+    });
+  }
+  const result = relationalDb.revokeDevice(String(req.params.deviceId || ''), auth.actor.uid);
+  if (!result.success) return res.status(result.code || 400).json(result);
+  res.json({ ...result, devices: relationalDb.listDevices(), approvedCount: relationalDb.countApprovedDevices(), maxDevices: 3 });
+});
+
+app.delete('/api/devices/:deviceId', (req, res) => {
+  const auth = verifyAdminActor(req);
+  if (!auth.ok || !auth.actor) {
+    return res.status(auth.code || 403).json({
+      success: false,
+      errorCode: auth.errorCode,
+      message: auth.error || 'ACCESS DENIED: Administration access required.'
+    });
+  }
+  const result = relationalDb.deleteDevice(String(req.params.deviceId || ''), auth.actor.uid);
+  if (!result.success) return res.status(result.code || 400).json(result);
+  res.json({ ...result, devices: relationalDb.listDevices(), approvedCount: relationalDb.countApprovedDevices(), maxDevices: 3 });
 });
 
 app.get('/api/permissions/schema', (req, res) => {

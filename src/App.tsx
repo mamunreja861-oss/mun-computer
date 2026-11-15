@@ -25,6 +25,25 @@ import { jsPDF } from 'jspdf';
 import { OfflineIndicator, PWAInstallModalHost } from './components/PWAInstallButton';
 import { SessionTimeoutNotice } from './components/SessionTimeoutNotice';
 import '../js/app.js';
+import {
+  installAuthFetchInterceptor,
+  getOrCreateDeviceIdentity,
+  commitAuthTokens,
+  commitAuthenticatedUserCache,
+  clearLocalAuthStorageOnly,
+  broadcastLocalLogout,
+  getSharedLastActivityAt,
+  touchSharedActivity,
+  resetSharedActivity,
+  isTerminalAuthErrorCode
+} from '../js/authCoordinator.js';
+
+declare const __APP_VERSION__: string;
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__ ? __APP_VERSION__ : '1.0.0';
+
+if (typeof window !== 'undefined') {
+  installAuthFetchInterceptor();
+}
 
 declare global {
   interface Window {
@@ -137,9 +156,12 @@ function readStoredUser(): AuthUser | null {
 function getAuthRequestHeaders(user: AuthUser | null): Record<string, string> {
   const token = localStorage.getItem(ERP_SESSION_KEY) || '';
   const csrf = localStorage.getItem(ERP_CSRF_KEY) || '';
+  const { deviceId, deviceName } = getOrCreateDeviceIdentity();
   const headers: Record<string, string> = {};
   if (token) headers['x-session-token'] = token;
   if (csrf) headers['x-csrf-token'] = csrf;
+  if (deviceId) headers['x-device-id'] = deviceId;
+  if (deviceName) headers['x-device-name'] = deviceName;
   if (user?.uid) headers['x-actor-uid'] = user.uid;
   return headers;
 }
@@ -389,11 +411,7 @@ export default function App() {
   const extendSessionActivityRef = useRef<(() => void) | null>(null);
 
   const clearAuthStorage = useCallback(() => {
-    localStorage.removeItem(ERP_SESSION_KEY);
-    localStorage.removeItem(ERP_CSRF_KEY);
-    localStorage.removeItem(ERP_USER_KEY);
-    localStorage.removeItem('mun_computer_v3_user');
-    localStorage.removeItem('mun_current_user');
+    clearLocalAuthStorageOnly();
   }, []);
 
   const loadLoginCaptcha = useCallback(async () => {
@@ -505,22 +523,26 @@ export default function App() {
       }
 
       // Verify central session version token in background for restored sessions
-      const token = localStorage.getItem(ERP_SESSION_KEY);
-      if (token && !skipSessionCheck) {
+      // Interceptor transparently handles single-flight refresh on ACCESS_TOKEN_EXPIRED
+      if (!skipSessionCheck) {
         try {
           const sessResp = await fetch('/api/auth/session', {
-            headers: { 'x-session-token': token }
+            headers: getAuthRequestHeaders(cleanUser)
           });
           if (signal?.cancelled) return;
-          if (sessResp.status === 401) {
-            resetToLoginScreen({
-              type: 'info',
-              text: 'Your session expired or was updated. Please sign in again.'
-            });
-            return;
+          if (sessResp.status === 401 || sessResp.status === 403) {
+            const errData = await sessResp.json().catch(() => ({}));
+            const errCode = String(errData?.errorCode || '').toUpperCase();
+            if (isTerminalAuthErrorCode(errCode)) {
+              resetToLoginScreen({
+                type: 'info',
+                text: errData?.message || 'Your session expired or was revoked. Please sign in again.'
+              });
+              return;
+            }
           }
         } catch {
-          // continue with local render if offline
+          // continue with local render if offline or temporary network hiccup
         }
       }
 
@@ -594,9 +616,11 @@ export default function App() {
   );
 
   useEffect(() => {
-    const onErpLogout = () => {
+    const onErpLogout = (ev: Event) => {
+      const customEv = ev as CustomEvent<{ reason?: string }>;
       const reason =
         idleLogoutReasonRef.current ||
+        customEv?.detail?.reason ||
         'Signed out successfully. Enter your credentials to sign in again.';
       idleLogoutReasonRef.current = null;
       resetToLoginScreen({
@@ -630,16 +654,16 @@ export default function App() {
     if (!currentUserRef.current) return;
     setIsExtendingSession(true);
     try {
-      const token = localStorage.getItem(ERP_SESSION_KEY);
-      if (token) {
-        const resp = await fetch('/api/auth/session', {
-          headers: { 'x-session-token': token }
-        });
-        if (resp.status === 401) {
+      const resp = await fetch('/api/auth/session', {
+        headers: getAuthRequestHeaders(currentUserRef.current)
+      });
+      if (resp.status === 401 || resp.status === 403) {
+        const errData = await resp.json().catch(() => ({}));
+        if (isTerminalAuthErrorCode(errData?.errorCode)) {
           setIsSessionWarningVisible(false);
           resetToLoginScreen({
             type: 'info',
-            text: 'Your session expired or was invalidated. Please sign in again.'
+            text: errData?.message || 'Your session expired or was invalidated. Please sign in again.'
           });
           return;
         }
@@ -649,6 +673,7 @@ export default function App() {
     } finally {
       setIsExtendingSession(false);
     }
+    resetSharedActivity();
     extendSessionActivityRef.current?.();
   }, [resetToLoginScreen]);
 
@@ -658,13 +683,10 @@ export default function App() {
       window.MJK.handleLogout();
       return;
     }
-    resetToLoginScreen({
-      type: 'info',
-      text: 'Signed out successfully. Enter your credentials to sign in again.'
-    });
-  }, [resetToLoginScreen]);
+    broadcastLocalLogout('Signed out successfully. Enter your credentials to sign in again.');
+  }, []);
 
-  // Client-side 15-minute inactivity timer with 2-minute countdown warning
+  // Client-side 15-minute cross-tab shared inactivity timer with 2-minute countdown warning
   useEffect(() => {
     if (!activeUid) {
       setIsSessionWarningVisible(false);
@@ -672,7 +694,7 @@ export default function App() {
       return;
     }
 
-    let lastActivityAt = Date.now();
+    let lastActivityAt = Math.max(Date.now(), getSharedLastActivityAt());
     let timeoutId: number | null = null;
     let countdownIntervalId: number | null = null;
     let lastThrottleResetAt = Date.now();
@@ -689,13 +711,24 @@ export default function App() {
       }
     };
 
+    const getEffectiveLastActivity = () => {
+      lastActivityAt = Math.max(lastActivityAt, getSharedLastActivityAt());
+      return lastActivityAt;
+    };
+
     const startCountdownTicker = () => {
       if (countdownIntervalId !== null) return;
       const updateTick = () => {
-        const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityAt);
+        const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - getEffectiveLastActivity());
         if (remaining <= 0) {
           clearTimers();
           triggerInactivityLogout();
+          return;
+        }
+        if (remaining > INACTIVITY_WARNING_MS) {
+          warningShown = false;
+          setIsSessionWarningVisible(false);
+          scheduleCheck();
           return;
         }
         setSessionRemainingMs(remaining);
@@ -706,7 +739,7 @@ export default function App() {
 
     const scheduleCheck = () => {
       clearTimers();
-      const elapsed = Date.now() - lastActivityAt;
+      const elapsed = Date.now() - getEffectiveLastActivity();
       const remaining = INACTIVITY_TIMEOUT_MS - elapsed;
 
       if (remaining <= 0) {
@@ -734,7 +767,7 @@ export default function App() {
     };
 
     const resetActivity = () => {
-      lastActivityAt = Date.now();
+      lastActivityAt = resetSharedActivity();
       lastThrottleResetAt = lastActivityAt;
       warningShown = false;
       setIsSessionWarningVisible(false);
@@ -746,7 +779,8 @@ export default function App() {
 
     const handleUserActivity = () => {
       const now = Date.now();
-      if (now - lastActivityAt >= INACTIVITY_TIMEOUT_MS) {
+      const effectiveLast = getEffectiveLastActivity();
+      if (now - effectiveLast >= INACTIVITY_TIMEOUT_MS) {
         clearTimers();
         triggerInactivityLogout();
         return;
@@ -755,20 +789,22 @@ export default function App() {
       // so passive mouse movement doesn't dismiss the timer before the user sees it.
       if (warningShown) return;
 
-      lastActivityAt = now;
-      if (now - lastThrottleResetAt >= 1000) {
+      lastActivityAt = touchSharedActivity();
+      if (now - lastThrottleResetAt >= 1500) {
         lastThrottleResetAt = now;
         scheduleCheck();
       }
     };
 
+    // Never trigger logout directly from visibilitychange/focus; only re-sync shared multi-tab clock & reschedule
     const handleVisibilityOrFocus = () => {
       if (document.visibilityState === 'hidden') return;
-      const remaining = INACTIVITY_TIMEOUT_MS - (Date.now() - lastActivityAt);
-      if (remaining <= 0) {
-        clearTimers();
-        triggerInactivityLogout();
-      } else {
+      getEffectiveLastActivity();
+      if (Date.now() - lastActivityAt < INACTIVITY_TIMEOUT_MS - INACTIVITY_WARNING_MS && warningShown) {
+        warningShown = false;
+        setIsSessionWarningVisible(false);
+      }
+      if (Date.now() - lastActivityAt < INACTIVITY_TIMEOUT_MS) {
         scheduleCheck();
       }
     };
@@ -922,15 +958,17 @@ export default function App() {
   const completeAuthenticatedSession = useCallback(
     (data: any) => {
       const user: AuthUser = { ...data.user, isLoggedOut: false };
-      if (data.sessionToken) {
-        localStorage.setItem(ERP_SESSION_KEY, data.sessionToken);
-      }
-      if (data.csrfToken) {
-        localStorage.setItem(ERP_CSRF_KEY, data.csrfToken);
-      }
-      localStorage.setItem(ERP_USER_KEY, JSON.stringify(user));
-      localStorage.setItem('mun_computer_v3_user', JSON.stringify(user));
-      localStorage.setItem('mun_current_user', JSON.stringify(user));
+      commitAuthTokens({
+        sessionToken: data.sessionToken,
+        csrfToken: data.csrfToken,
+        sessionId: data.sessionId || '',
+        deviceId: data.deviceId || getOrCreateDeviceIdentity().deviceId,
+        generation: data.generation || 1,
+        expiresAt: data.expiresAt || '',
+        sessionExpiresAt: data.sessionExpiresAt || ''
+      });
+      commitAuthenticatedUserCache(user);
+      resetSharedActivity();
 
       const requireChange = Boolean(data.mustChangePassword || user.mustChangePassword);
       if (requireChange) {
@@ -988,18 +1026,26 @@ export default function App() {
 
     setIsLoading(true);
     try {
+      const { deviceId, deviceName, platform } = getOrCreateDeviceIdentity();
       const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId,
+          'x-device-name': deviceName
+        },
         body: JSON.stringify({
           uid: cleanUid,
           password,
           panelRole: activePanel,
           captchaToken: loginCaptchaToken,
-          captchaInput: loginCaptchaInput.trim()
+          captchaInput: loginCaptchaInput.trim(),
+          deviceId,
+          deviceName,
+          platform
         })
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (response.ok && data.success && data.mfaRequired && data.mfaPendingToken) {
         setMfaChallenge({ uid: data.uid || cleanUid, pendingToken: data.mfaPendingToken });
@@ -1008,8 +1054,10 @@ export default function App() {
       } else if (response.ok && data.success && data.user) {
         completeAuthenticatedSession(data);
       } else {
+        const errCode = String(data?.errorCode || '');
+        const isDevicePending = errCode === 'DEVICE_PENDING_APPROVAL';
         setLoginAlert({
-          type: 'error',
+          type: isDevicePending ? 'info' : 'error',
           text: data.message || 'Authentication failed. Check your User ID, password, or CAPTCHA.'
         });
         loadLoginCaptcha();
@@ -1036,19 +1084,31 @@ export default function App() {
     }
     setIsLoading(true);
     try {
+      const { deviceId, deviceName, platform } = getOrCreateDeviceIdentity();
       const response = await fetch('/api/auth/mfa/verify-login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId,
+          'x-device-name': deviceName
+        },
         body: JSON.stringify({
           mfaPendingToken: mfaChallenge.pendingToken,
-          totpCode: code
+          totpCode: code,
+          deviceId,
+          deviceName,
+          platform
         })
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok && data.success && data.user) {
         completeAuthenticatedSession(data);
       } else {
-        setLoginAlert({ type: 'error', text: data.message || 'Invalid 6-digit authenticator code.' });
+        const errCode = String(data?.errorCode || '');
+        setLoginAlert({
+          type: errCode === 'DEVICE_PENDING_APPROVAL' ? 'info' : 'error',
+          text: data.message || 'Invalid 6-digit authenticator code.'
+        });
       }
     } catch {
       setLoginAlert({ type: 'error', text: 'Network error during MFA verification.' });
@@ -1078,6 +1138,7 @@ export default function App() {
 
     setIsChangingPwd(true);
     try {
+      const { deviceId, deviceName, platform } = getOrCreateDeviceIdentity();
       const response = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: {
@@ -1088,21 +1149,31 @@ export default function App() {
           uid: currentUser?.uid || uid,
           currentPassword: changeCurrentPwd,
           newPassword: changeNewPwd,
-          confirmPassword: changeConfirmPwd
+          confirmPassword: changeConfirmPwd,
+          deviceId,
+          deviceName,
+          platform
         })
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (response.ok && data.success) {
-        if (data.sessionToken) localStorage.setItem(ERP_SESSION_KEY, data.sessionToken);
-        if (data.csrfToken) localStorage.setItem(ERP_CSRF_KEY, data.csrfToken);
+        if (data.sessionToken) {
+          commitAuthTokens({
+            sessionToken: data.sessionToken,
+            csrfToken: data.csrfToken,
+            sessionId: data.sessionId || '',
+            deviceId: data.deviceId || deviceId,
+            generation: data.generation || 1,
+            expiresAt: data.expiresAt || '',
+            sessionExpiresAt: data.sessionExpiresAt || ''
+          });
+        }
         const updated: AuthUser = {
           ...(data.user || currentUser!),
           mustChangePassword: false,
           isLoggedOut: false
         };
-        localStorage.setItem(ERP_USER_KEY, JSON.stringify(updated));
-        localStorage.setItem('mun_computer_v3_user', JSON.stringify(updated));
-        localStorage.setItem('mun_current_user', JSON.stringify(updated));
+        commitAuthenticatedUserCache(updated);
         justLoggedInRef.current = true;
         setCurrentUser(updated);
         setIsMandatoryModalOpen(false);
@@ -1120,10 +1191,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    resetToLoginScreen({
-      type: 'info',
-      text: 'Signed out successfully. Enter your credentials to sign in again.'
-    });
+    if (typeof window.MJK?.handleLogout === 'function') {
+      window.MJK.handleLogout();
+      return;
+    }
+    broadcastLocalLogout('Signed out successfully. Enter your credentials to sign in again.');
   };
 
   // --- Forgot Password & Official Receipt System (Sections 7, 8, 9, 10) ---
@@ -1777,6 +1849,15 @@ export default function App() {
                   </div>
                 </form>
               )}
+
+              <div className="relative z-10 mt-4 pt-3 border-t border-slate-200/70 flex items-center justify-center">
+                <span
+                  data-testid="app-version-badge"
+                  className="text-[11px] font-mono font-semibold tracking-wide text-slate-500/90 tabular-nums"
+                >
+                  v{APP_VERSION}
+                </span>
+              </div>
             </motion.div>
           </div>
 

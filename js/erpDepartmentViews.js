@@ -30,8 +30,14 @@ import {
   saveSystemSecuritySettings,
   setupMainAdminMfa,
   enableMainAdminMfa,
-  disableMainAdminMfa
+  disableMainAdminMfa,
+  fetchRegisteredDevices,
+  approveRegisteredDevice,
+  rejectRegisteredDevice,
+  revokeRegisteredDevice,
+  deleteRegisteredDevice
 } from './settings.js';
+import { getOrCreateDeviceIdentity } from './authCoordinator.js';
 import { getLucideIcon } from './lucideIcons.js';
 import { getDynamicNavBadgeCounts } from './notifications.js';
 import { generateFinancialSummary } from './reports.js';
@@ -110,7 +116,14 @@ const DeptUiState = {
   sysSettings: null,
   sysSettingsLoading: false,
   sysSettingsLoaded: false,
-  mfaSetup: null
+  mfaSetup: null,
+  devicesState: {
+    devices: [],
+    approvedCount: 0,
+    maxDevices: 3,
+    loading: false,
+    loaded: false
+  }
 };
 
 async function ensureDbHealthLoaded(force = false) {
@@ -142,6 +155,27 @@ async function ensureSysSettingsLoaded(force = false) {
     DeptUiState.sysSettingsLoaded = true;
   } finally {
     DeptUiState.sysSettingsLoading = false;
+    if (window.MJK && typeof window.MJK.render === 'function') {
+      const h = String(window.location.hash || '');
+      if (h.includes('security-settings')) window.MJK.render(true);
+    }
+  }
+}
+
+async function ensureDevicesLoaded(force = false) {
+  const st = DeptUiState.devicesState;
+  if (st.loading || (st.loaded && !force)) return;
+  st.loading = true;
+  try {
+    const res = await fetchRegisteredDevices();
+    if (res.success) {
+      st.devices = Array.isArray(res.devices) ? res.devices : [];
+      st.approvedCount = Number(res.approvedCount || 0);
+      st.maxDevices = Number(res.maxDevices || 3);
+    }
+    st.loaded = true;
+  } finally {
+    st.loading = false;
     if (window.MJK && typeof window.MJK.render === 'function') {
       const h = String(window.location.hash || '');
       if (h.includes('security-settings')) window.MJK.render(true);
@@ -1301,7 +1335,7 @@ function buildDeterministicBarcodeBarsHtml(code, compact = false) {
 
 function buildBarcodeStickerCardHtml(item, sizeMode = 'standard', rollWidth = '2in') {
   const code = String(item?.sku || item?.id || 'MUN-BARCODE').toUpperCase();
-  const title = item?.name || item?.itemName || 'Sample Product';
+  const title = item?.name || item?.itemName || 'Inventory Item';
   const price = Number(item?.sellingPrice ?? item?.unitPrice ?? 0);
   const compact = sizeMode === 'compact';
   const maxWidth = rollWidth === '3in' ? '76mm' : '48mm';
@@ -3287,6 +3321,7 @@ export function renderDataImportExportView() {
 
 export function renderSecuritySettingsView() {
   ensureSysSettingsLoaded(false);
+  ensureDevicesLoaded(false);
   const sec = getItem(KEYS.SECURITY_SETTINGS, { enforceDeleteReason: true, sessionTimeoutMins: 480, serverTokenSigning: true });
   const srv = DeptUiState.sysSettings || {};
   const curUser = getCurrentUser();
@@ -3294,20 +3329,96 @@ export function renderSecuritySettingsView() {
   const mfaEnabled = Boolean(curUser?.mfaEnabled);
   const mfaSetup = DeptUiState.mfaSetup;
   const auditLogs = getItem(KEYS.AUDIT_LOGS, []).slice(0, 25);
+  const devState = DeptUiState.devicesState || { devices: [], approvedCount: 0, maxDevices: 3, loading: false };
+  const currentDeviceId = getOrCreateDeviceIdentity().deviceId;
+  const devices = Array.isArray(devState.devices) ? devState.devices : [];
+  const approvedCount = Number(devState.approvedCount || 0);
+  const maxDevices = Number(devState.maxDevices || 3);
 
   return `
-    ${pageHeader('shield-check', 'System Security Policies & MFA Control Center', 'Enterprise Zero-Trust Architecture — Argon2id hashing, brute-force lockouts, TOTP MFA & mandatory deletion compliance')}
+    ${pageHeader('shield-check', 'System Security Policies & MFA Control Center', 'Enterprise Zero-Trust Architecture — Argon2id hashing, brute-force lockouts, TOTP MFA & Global 3-Device Registration Policy')}
 
     <div class="card" style="background:#0B1530; color:#ffffff; border:1px solid #1E2E58; padding:1.15rem 1.3rem; margin-bottom:1.15rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.85rem;">
       <div>
         <div style="font-size:0.72rem; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:#D6B56D;">Enterprise Zero-Trust Architecture</div>
         <div style="font-size:1.05rem; font-weight:800; margin-top:0.2rem;">Cryptographic Security Posture Active</div>
-        <div style="font-size:0.78rem; color:#cbd5e1; margin-top:0.15rem;">HttpOnly signed sessions, CSRF header validation, Argon2id key derivation &amp; immutable audit logs.</div>
+        <div style="font-size:0.78rem; color:#cbd5e1; margin-top:0.15rem;">HttpOnly refresh cookies, single-flight token rotation, CSRF validation, Argon2id &amp; global device authorization.</div>
       </div>
       <div style="display:flex; flex-wrap:wrap; gap:0.45rem;">
         <span class="badge" style="background:rgba(16,185,129,0.2); color:#6ee7b7; border:1px solid rgba(16,185,129,0.4);">Argon2id Active</span>
-        <span class="badge" style="background:rgba(20,184,166,0.2); color:#5eead4; border:1px solid rgba(20,184,166,0.4);">CSRF Protected</span>
+        <span class="badge" style="background:rgba(20,184,166,0.2); color:#5eead4; border:1px solid rgba(20,184,166,0.4);">Devices: ${approvedCount} / ${maxDevices} Approved</span>
         <span class="badge" style="background:rgba(139,92,246,0.2); color:#c4b5fd; border:1px solid rgba(139,92,246,0.4);">TOTP MFA ${mfaEnabled ? 'Enrolled' : 'Ready'}</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:1.25rem; margin-bottom:1.15rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.65rem; margin-bottom:0.85rem; padding-bottom:0.65rem; border-bottom:1px solid var(--border-subtle);">
+        <div>
+          <h3 style="margin:0; font-size:1rem;">Global Registered Devices (${approvedCount} / ${maxDevices} Approved Globally)</h3>
+          <div style="font-size:0.76rem; color:var(--text-muted);">Maximum ${maxDevices} approved devices across Admin, Manager &amp; Staff combined. Admin approval required before a new device can sign in.</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span class="badge ${approvedCount >= maxDevices ? 'badge-warning' : 'badge-success'}">${approvedCount} / ${maxDevices} Slots Used</span>
+          <button type="button" class="btn btn-outline btn-sm" onclick="window.MJK.refreshDevices()">${devState.loading ? 'Refreshing...' : 'Refresh Devices'}</button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Device &amp; ID</th>
+              <th>Requested By</th>
+              <th>Status</th>
+              <th>Active Tabs / Sessions</th>
+              <th>Last Seen</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${devices.map(d => {
+              const isCurrent = d.deviceId === currentDeviceId;
+              const statusBadge =
+                d.status === 'APPROVED' ? 'badge-success' :
+                d.status === 'PENDING' ? 'badge-warning' :
+                'badge-danger';
+              const canApprove = (d.status === 'PENDING' || d.status === 'REVOKED' || d.status === 'REJECTED') && approvedCount < maxDevices;
+              return `
+                <tr>
+                  <td>
+                    <div style="font-weight:700; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
+                      <span>${esc(d.deviceName || 'Browser Workstation')}</span>
+                      ${isCurrent ? '<span class="badge badge-info">Current Device</span>' : ''}
+                    </div>
+                    <div class="font-mono" style="font-size:0.72rem; color:var(--text-muted);">${esc(d.deviceId)}</div>
+                  </td>
+                  <td>
+                    <div class="font-mono" style="font-size:0.78rem; font-weight:700;">${esc(d.requestedByUid || '-')}</div>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">${esc(d.requestedByRole || '')}${d.approvedByUid ? ` · Approved by ${esc(d.approvedByUid)}` : ''}</div>
+                  </td>
+                  <td><span class="badge ${statusBadge}">${esc(d.status)}</span></td>
+                  <td class="tabular-nums">${Number(d.activeSessionCount || 0)} active</td>
+                  <td class="tabular-nums" style="white-space:nowrap; font-size:0.78rem;">${d.lastSeenAt ? formatDateTime(d.lastSeenAt) : '-'}</td>
+                  <td style="text-align:right; white-space:nowrap;">
+                    <div style="display:inline-flex; gap:0.35rem; flex-wrap:wrap; justify-content:flex-end;">
+                      ${d.status === 'PENDING' || d.status === 'REVOKED' || d.status === 'REJECTED' ? `
+                        <button type="button" class="btn btn-primary btn-sm" ${canApprove ? '' : 'disabled title="Global 3-device limit reached. Revoke or delete another device first."'} onclick="window.MJK.approveDevice('${escAttr(d.deviceId)}')">Approve</button>
+                      ` : ''}
+                      ${d.status === 'PENDING' ? `
+                        <button type="button" class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger-border);" onclick="window.MJK.rejectDevice('${escAttr(d.deviceId)}')">Reject</button>
+                      ` : ''}
+                      ${d.status === 'APPROVED' && !isCurrent ? `
+                        <button type="button" class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger-border);" onclick="window.MJK.revokeDevice('${escAttr(d.deviceId)}')">Revoke</button>
+                      ` : ''}
+                      ${!isCurrent ? `
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="window.MJK.deleteDevice('${escAttr(d.deviceId)}')">Remove</button>
+                      ` : '<span style="font-size:0.72rem; color:var(--text-muted); padding:0.25rem 0.4rem;">Active Host</span>'}
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('') || '<tr><td colspan="6" style="text-align:center; padding:1.25rem; color:var(--text-muted);">No devices registered yet.</td></tr>'}
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -3362,15 +3473,16 @@ export function renderSecuritySettingsView() {
           <span class="badge ${mfaEnabled ? 'badge-success' : 'badge-warning'}">${mfaEnabled ? 'Enrolled & Active' : 'Setup Ready'}</span>
         </div>
         <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:0.9rem;">
-          Main Administrator account <strong>${MAIN_ADMIN_UID}</strong> supports TOTP SHA-1 (30s step) verification, single-use recovery backup codes &amp; rate-limited attempts.
+          Main Administrator account <strong>${MAIN_ADMIN_UID}</strong> supports TOTP SHA-1 (30s step) verification &amp; rate-limited attempts.
         </p>
         <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.9rem;">
-          <button type="button" class="btn btn-outline btn-sm" onclick="window.MJK.openMfaRecoveryModal()">🔐 View TOTP URI &amp; 8 Backup Recovery Codes</button>
           ${isRootMain ? (mfaEnabled ? `
             <button type="button" class="btn btn-outline btn-sm" style="color:var(--danger); border-color:var(--danger-border);" onclick="window.MJK.confirmDisableMainAdminMfa()">Reset / Disable TOTP Device</button>
           ` : (!mfaSetup ? `
             <button type="button" class="btn btn-primary btn-sm" onclick="window.MJK.initMainAdminMfaSetup()">Setup Two-Factor Authentication</button>
-          ` : '')) : ''}
+          ` : `
+            <button type="button" class="btn btn-outline btn-sm" onclick="window.MJK.openMfaRecoveryModal()">View Generated TOTP Key &amp; URI</button>
+          `)) : ''}
         </div>
         ${isRootMain && !mfaEnabled && mfaSetup ? `
           <div style="padding:0.85rem; background:var(--surface-alt); border:1px solid var(--border-subtle); border-radius:var(--radius-md); margin-bottom:0.75rem;">
@@ -5036,24 +5148,17 @@ export function createErpDepartmentHandlers({ showToast, openModal, closeModal, 
 
     openMfaRecoveryModal: () => {
       const mfaSetup = DeptUiState.mfaSetup;
-      const secret = mfaSetup?.secret || 'JBSWY3DPEHPK3PXP';
-      const uri = mfaSetup?.otpAuthUri || `otpauth://totp/MUN_COMPUTER:${MAIN_ADMIN_UID}?secret=${secret}&issuer=MUN_COMPUTER_ERP`;
-      const backupCodes = [
-        'MUN-8492-AX', 'MUN-3921-BY', 'MUN-1048-CZ', 'MUN-9283-DX',
-        'MUN-5519-EX', 'MUN-7402-FX', 'MUN-6120-GX', 'MUN-4918-HX'
-      ];
-      openModal('Main Admin TOTP Authenticator & Recovery Codes', `
+      if (!mfaSetup?.secret) {
+        showToast('Initialize Two-Factor Authentication setup first to view your live TOTP secret key.', 'info');
+        return;
+      }
+      const secret = mfaSetup.secret;
+      const uri = mfaSetup.otpAuthUri || `otpauth://totp/MUN_COMPUTER:${MAIN_ADMIN_UID}?secret=${secret}&issuer=MUN_COMPUTER_ERP`;
+      openModal('Main Admin TOTP Authenticator Key', `
         <div style="text-align:center; padding:0.9rem; background:var(--surface-alt); border:1px dashed var(--border-subtle); border-radius:var(--radius-md); margin-bottom:0.95rem;">
           <div style="font-size:0.74rem; font-weight:700; color:var(--text-muted); margin-bottom:0.35rem;">Authenticator Secret Key (Base32)</div>
           <div class="font-mono" style="font-weight:800; font-size:1rem; color:var(--blue-600); word-break:break-all; margin-bottom:0.35rem;">${esc(secret)}</div>
           <div class="font-mono" style="font-size:0.7rem; color:var(--text-muted); word-break:break-all;">${esc(uri)}</div>
-        </div>
-        <div style="margin-bottom:0.95rem;">
-          <label class="form-label" style="font-size:0.74rem; text-transform:uppercase;">Single-Use Backup Recovery Codes (8)</label>
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.45rem; background:var(--surface-alt); padding:0.75rem; border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
-            ${backupCodes.map(c => `<div class="font-mono" style="background:var(--surface); border:1px solid var(--border-subtle); border-radius:6px; padding:0.35rem 0.5rem; text-align:center; font-size:0.8rem; font-weight:700;">${c}</div>`).join('')}
-          </div>
-          <div style="font-size:0.72rem; color:var(--text-muted); margin-top:0.4rem;">Store these recovery keys securely offline in case your authenticator device is unavailable.</div>
         </div>
         <div style="display:flex; justify-content:flex-end;">
           <button type="button" class="btn btn-primary btn-sm" onclick="window.MJK.closeModal()">Close &amp; Confirm</button>
@@ -5212,6 +5317,56 @@ export function createErpDepartmentHandlers({ showToast, openModal, closeModal, 
         showToast(res.message || 'TOTP MFA disabled.', 'info');
       } else {
         showToast(res.message || 'Failed to disable MFA.', 'danger');
+      }
+      render();
+    },
+
+    refreshDevices: async () => {
+      await ensureDevicesLoaded(true);
+      showToast('Registered devices list refreshed.', 'info');
+      render();
+    },
+
+    approveDevice: async (deviceId) => {
+      const res = await approveRegisteredDevice(deviceId);
+      if (res.success) {
+        await ensureDevicesLoaded(true);
+        showToast(res.message || 'Device approved for ERP access.', 'success');
+      } else {
+        showToast(res.message || 'Unable to approve device.', 'danger');
+      }
+      render();
+    },
+
+    rejectDevice: async (deviceId) => {
+      const res = await rejectRegisteredDevice(deviceId);
+      if (res.success) {
+        await ensureDevicesLoaded(true);
+        showToast(res.message || 'Device request rejected.', 'warning');
+      } else {
+        showToast(res.message || 'Unable to reject device.', 'danger');
+      }
+      render();
+    },
+
+    revokeDevice: async (deviceId) => {
+      const res = await revokeRegisteredDevice(deviceId);
+      if (res.success) {
+        await ensureDevicesLoaded(true);
+        showToast(res.message || 'Device access revoked cleanly.', 'warning');
+      } else {
+        showToast(res.message || 'Unable to revoke device.', 'danger');
+      }
+      render();
+    },
+
+    deleteDevice: async (deviceId) => {
+      const res = await deleteRegisteredDevice(deviceId);
+      if (res.success) {
+        await ensureDevicesLoaded(true);
+        showToast(res.message || 'Device removed from registry.', 'info');
+      } else {
+        showToast(res.message || 'Unable to remove device.', 'danger');
       }
       render();
     }

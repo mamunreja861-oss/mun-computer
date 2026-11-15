@@ -1054,10 +1054,13 @@ function signPayload(payload: Record<string, any>, purpose: string): string {
   return `${json}.${sig}`;
 }
 
-function verifyPayload<T = Record<string, any>>(token: string, purpose: string): T | null {
-  if (!token || !token.includes('.')) return null;
+function verifyPayloadDetailed<T = Record<string, any>>(
+  token: string,
+  purpose: string
+): { valid: boolean; expired?: boolean; payload?: T } {
+  if (!token || !token.includes('.')) return { valid: false };
   const [json, sig] = token.split('.');
-  if (!json || !sig) return null;
+  if (!json || !sig) return { valid: false };
   const expected = crypto
     .createHmac('sha256', getRuntimeSecretKey(purpose))
     .update(json)
@@ -1065,33 +1068,82 @@ function verifyPayload<T = Record<string, any>>(token: string, purpose: string):
   const sigBuf = Buffer.from(sig);
   const expBuf = Buffer.from(expected);
   if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
-    return null;
+    return { valid: false };
   }
   try {
     const data = JSON.parse(Buffer.from(json, 'base64url').toString('utf8'));
-    if (data.exp && Date.now() > data.exp) return null;
-    return data as T;
+    if (data.exp && Date.now() > data.exp) {
+      return { valid: false, expired: true, payload: data as T };
+    }
+    return { valid: true, payload: data as T };
   } catch {
-    return null;
+    return { valid: false };
   }
 }
 
-export function issueSessionToken(user: { uid: string; role: string; isSuperAdmin?: boolean; sessionVersion?: number }): string {
+function verifyPayload<T = Record<string, any>>(token: string, purpose: string): T | null {
+  const res = verifyPayloadDetailed<T>(token, purpose);
+  return res.valid && res.payload ? res.payload : null;
+}
+
+export const DEFAULT_ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+export interface AccessTokenPayload {
+  uid: string;
+  role: string;
+  isSuperAdmin: boolean;
+  sv?: number;
+  sid?: string;
+  did?: string;
+  iat?: number;
+  exp?: number;
+}
+
+export function issueAccessToken(user: {
+  uid: string;
+  role: string;
+  isSuperAdmin?: boolean;
+  sessionVersion?: number;
+  sessionId?: string;
+  deviceId?: string;
+  ttlMs?: number;
+}): string {
+  const ttl = Math.max(1000, Number(user.ttlMs || DEFAULT_ACCESS_TOKEN_TTL_MS));
   return signPayload(
     {
       uid: user.uid,
       role: user.role,
       isSuperAdmin: Boolean(user.isSuperAdmin || user.uid === SUPER_ADMIN_UID),
       sv: Number(user.sessionVersion || 1),
+      ...(user.sessionId ? { sid: user.sessionId } : {}),
+      ...(user.deviceId ? { did: user.deviceId } : {}),
       nonce: crypto.randomBytes(6).toString('hex'),
       iat: Date.now(),
-      exp: Date.now() + 12 * 60 * 60 * 1000 // 12h
+      exp: Date.now() + ttl
     },
     'session'
   );
 }
 
-export function verifySessionToken(token: string): { uid: string; role: string; isSuperAdmin: boolean; sv?: number } | null {
+export function verifyAccessTokenDetailed(
+  token: string
+): { valid: boolean; expired?: boolean; payload?: AccessTokenPayload } {
+  return verifyPayloadDetailed<AccessTokenPayload>(token, 'session');
+}
+
+export function issueSessionToken(user: {
+  uid: string;
+  role: string;
+  isSuperAdmin?: boolean;
+  sessionVersion?: number;
+  sessionId?: string;
+  deviceId?: string;
+  ttlMs?: number;
+}): string {
+  return issueAccessToken(user);
+}
+
+export function verifySessionToken(token: string): AccessTokenPayload | null {
   return verifyPayload(token, 'session');
 }
 
@@ -1225,8 +1277,8 @@ class CentralErpDatabaseService {
   }
 
   private ensureInventoryCategoriesSeeded(): void {
-    if (!Array.isArray(this.db.inventoryCategories) || this.db.inventoryCategories.length === 0) {
-      this.db.inventoryCategories = this.buildDefaultGasInventoryCategories();
+    if (!Array.isArray(this.db.inventoryCategories)) {
+      this.db.inventoryCategories = [];
     }
   }
 
@@ -3395,70 +3447,12 @@ class CentralErpDatabaseService {
   // 90-DAY FOLLOW-UP CASES, DYNAMIC ADMIN OPTIONS, SCHEDULES, STATUS HISTORY & GRIEVANCES
   // -------------------------------------------------------------------------
   private ensure90DayDefaultSeeds(): void {
-    const nowIso = new Date().toISOString();
     if (!Array.isArray(this.db.adminOptions)) this.db.adminOptions = [];
     if (!Array.isArray(this.db.followupSchedules)) this.db.followupSchedules = [];
     if (!Array.isArray(this.db.statusHistory)) this.db.statusHistory = [];
     if (!Array.isArray(this.db.followups)) this.db.followups = [];
     if (!Array.isArray(this.db.grievances)) this.db.grievances = [];
     if (!Array.isArray(this.db.reminders)) this.db.reminders = [];
-
-    if (this.db.adminOptions.length === 0) {
-      const catCounters: Record<string, number> = {};
-      DEFAULT_ADMIN_OPTION_SEEDS.forEach((seed, idx) => {
-        catCounters[seed.category] = (catCounters[seed.category] || 0) + 1;
-        this.db.adminOptions!.push({
-          id: `OPT-${seed.category.toUpperCase()}-${String(catCounters[seed.category]).padStart(3, '0')}`,
-          category: seed.category,
-          label: seed.label,
-          sortOrder: idx + 1,
-          isActive: true,
-          isDeleted: false,
-          isDefault: true,
-          meta: seed.meta || {},
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          createdByUid: SUPER_ADMIN_UID
-        });
-      });
-    } else {
-      // Ensure any missing categories (added in upgrades) are seeded if completely empty for that category
-      const existingCats = new Set(this.db.adminOptions.map(o => o.category));
-      DEFAULT_ADMIN_OPTION_SEEDS.forEach((seed, idx) => {
-        if (!existingCats.has(seed.category)) {
-          this.db.adminOptions!.push({
-            id: `OPT-${seed.category.toUpperCase()}-${String(idx + 1).padStart(3, '0')}`,
-            category: seed.category,
-            label: seed.label,
-            sortOrder: idx + 1,
-            isActive: true,
-            isDeleted: false,
-            isDefault: true,
-            meta: seed.meta || {},
-            createdAt: nowIso,
-            updatedAt: nowIso,
-            createdByUid: SUPER_ADMIN_UID
-          });
-        }
-      });
-    }
-
-    if (this.db.followupSchedules.length === 0) {
-      DEFAULT_FOLLOWUP_SCHEDULE_SEEDS.forEach((m, idx) => {
-        this.db.followupSchedules!.push({
-          id: `SCH-DAY-${m.day}`,
-          day: m.day,
-          title: m.title,
-          description: m.description,
-          sortOrder: idx + 1,
-          isActive: true,
-          isDeleted: false,
-          isDefault: true,
-          createdAt: nowIso,
-          updatedAt: nowIso
-        });
-      });
-    }
   }
 
   get90DayBootstrap(): Record<string, any> {
@@ -4458,8 +4452,8 @@ class CentralErpDatabaseService {
     if (!match) {
       return { success: false, message: 'Category not found.', categories: this.getInventoryCategories() };
     }
-    if (list.length <= 1) {
-      return { success: false, message: 'At least one inventory category must remain.', categories: this.getInventoryCategories() };
+    if (list.length === 0) {
+      return { success: false, message: 'No inventory categories to delete.', categories: this.getInventoryCategories() };
     }
     this.db.inventoryCategories = list.filter(c => c.id !== match.id);
     this.save();

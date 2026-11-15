@@ -614,10 +614,10 @@ async function callWardApi(url, method, body = null) {
       headers: getAuthHeaders(),
       body: body ? JSON.stringify(body) : undefined
     });
-    if (res.status === 401) {
-      handleSessionInvalidationResponse(res);
-    }
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 || res.status === 403) {
+      handleSessionInvalidationResponse(res.status, data);
+    }
     if (data?.master) {
       setWardMasterStore(data.master);
     } else if (res.ok && data?.success) {

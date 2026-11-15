@@ -183,14 +183,8 @@ export function setRateChartMeta(meta) {
 }
 
 export function getAllRateChartItems() {
-  let list = getItem(RATE_CHART_KEY, null);
-  const meta = getRateChartMeta();
-  if (!Array.isArray(list) || (list.length === 0 && !meta?.seeded)) {
-    list = buildInitialRateChart();
-    setItem(RATE_CHART_KEY, list);
-    setRateChartMeta({ seeded: true });
-  }
-  return list;
+  const list = getItem(RATE_CHART_KEY, null);
+  return Array.isArray(list) ? list : [];
 }
 
 export function getRateChartItemById(id) {
@@ -1041,10 +1035,10 @@ export function setupRateChartHandlers(MJK, showToast, openModal, closeModal, sh
           <div class="form-group">
             <label class="form-label">Service Category <span class="req">*</span></label>
             <select id="rc-cat" class="form-control" required onchange="const nw=document.getElementById('rc-new-cat-wrap'); if(nw){ nw.style.display = this.value === '__NEW_CATEGORY__' ? 'block' : 'none'; }">
-              ${categories.map(c => `<option value="${escapeHtml(c)}" ${(existing?.category || 'Online Form Fill-up') === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
-              <option value="__NEW_CATEGORY__">+ Add New Custom Category...</option>
+              ${categories.map(c => `<option value="${escapeHtml(c)}" ${(existing?.category || categories[0] || '') === c ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}
+              <option value="__NEW_CATEGORY__" ${categories.length === 0 ? 'selected' : ''}>+ Add New Custom Category...</option>
             </select>
-            <div id="rc-new-cat-wrap" style="display:none; margin-top:0.45rem;">
+            <div id="rc-new-cat-wrap" style="display:${categories.length === 0 ? 'block' : 'none'}; margin-top:0.45rem;">
               <input type="text" id="rc-new-cat" class="form-control" placeholder="Enter new custom category name...">
             </div>
           </div>

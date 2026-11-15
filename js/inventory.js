@@ -35,9 +35,7 @@ function normalizeCategoryName(rawName) {
 export function getInventoryCategoryRecords() {
   const stored = getItem(KEYS.INVENTORY_CATEGORIES, null);
   if (!Array.isArray(stored) || stored.length === 0) {
-    const defaults = buildDefaultCategoryRecords();
-    setItem(KEYS.INVENTORY_CATEGORIES, defaults);
-    return defaults;
+    return [];
   }
 
   const normalized = [];
@@ -48,20 +46,14 @@ export function getInventoryCategoryRecords() {
     const key = name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    const isDefault = DEFAULT_GAS_CATEGORIES.some(d => d.toLowerCase() === key);
     normalized.push({
       id: (typeof entry === 'object' && entry?.id) ? entry.id : `CAT-${idx + 1}`,
       name,
-      isDefault: typeof entry === 'object' && entry?.isDefault !== undefined ? Boolean(entry.isDefault || isDefault) : isDefault,
+      isDefault: typeof entry === 'object' && entry?.isDefault !== undefined ? Boolean(entry.isDefault) : false,
       createdAt: (typeof entry === 'object' && entry?.createdAt) ? entry.createdAt : new Date().toISOString()
     });
   });
 
-  if (normalized.length === 0) {
-    const defaults = buildDefaultCategoryRecords();
-    setItem(KEYS.INVENTORY_CATEGORIES, defaults);
-    return defaults;
-  }
   return normalized;
 }
 
@@ -83,7 +75,7 @@ async function syncCategoriesToServer(actionPath, method = 'POST', payload = nul
     });
     if (res.ok) {
       const data = await res.json();
-      if (data?.success && Array.isArray(data.categories) && data.categories.length > 0) {
+      if (data?.success && Array.isArray(data.categories)) {
         setItem(KEYS.INVENTORY_CATEGORIES, data.categories);
       }
     }

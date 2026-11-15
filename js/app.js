@@ -53,6 +53,13 @@ import {
   formatRoleLabel,
   handleSessionInvalidationResponse
 } from './auth.js';
+import { installAuthFetchInterceptor } from './authCoordinator.js';
+
+if (typeof window !== 'undefined') {
+  installAuthFetchInterceptor();
+}
+
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__ ? __APP_VERSION__ : '1.0.0';
 import { getBusinessProfile, updateBusinessProfile, getBusinessUnits, getActiveUnitId, setActiveUnitId, getActiveUnit, addBusinessUnit } from './business.js';
 import { getAllCustomers, getCustomerById, saveCustomer, deleteCustomer, checkDuplicatePhone, getCustomerFullHistory, searchCustomers, DEFAULT_CUSTOMER_LOCATION } from './customers.js';
 import { getAllServices, getServiceById, getServicesByReceiptId, getReceiptSummary, findOpenReceiptForCustomerDate, saveService, saveServiceBatch, deleteService, deleteMultipleServices, updateServiceStatus, SERVICE_CATEGORIES, SERVICE_STATUSES, getServiceStatuses, getServiceStatusRecords, addCustomServiceStatus, deleteCustomServiceStatus, getServiceCategories, getServiceCategoryRecords, addCustomServiceCategory, deleteCustomServiceCategory, getCustomServiceCatalogData, getCustomSubServices, addCustomServiceEntry, deleteCustomServiceEntry, updateCustomServiceEntry, removeCatalogService, getRemovedCatalogServices, getSubcategoriesForCategory, getUnifiedServiceList, autoMapService, checkDuplicateServiceEntry } from './services.js';
@@ -1213,7 +1220,7 @@ document.addEventListener('click', (e) => {
 function renderLoginView() {
   const mode = AppState.loginRoleMode || 'ADMIN';
   const roleCode = ROLE_UID_CODES[mode] || '26';
-  const prefilledUid = mode === 'ADMIN' ? MAIN_ADMIN_UID : 'MC26000';
+  const prefilledUid = mode === 'ADMIN' ? MAIN_ADMIN_UID : '';
 
   return `
     <div style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:radial-gradient(circle at 18% 22%, rgba(16,185,129,0.16) 0%, transparent 45%), radial-gradient(circle at 82% 24%, rgba(124,58,237,0.18) 0%, transparent 45%), radial-gradient(circle at 22% 84%, rgba(249,115,22,0.14) 0%, transparent 45%), linear-gradient(160deg, #070e18 0%, #0b192c 55%, #091322 100%); padding:clamp(0.85rem, 3vw, 1.5rem);">
@@ -1254,6 +1261,9 @@ function renderLoginView() {
               Sign In (${escHtml(formatRoleLabel(mode))}) →
             </button>
           </form>
+          <div style="margin-top:0.85rem; padding-top:0.65rem; border-top:1px solid var(--border-subtle); text-align:center;">
+            <span data-testid="app-version-badge" class="font-mono tabular-nums" style="font-size:0.72rem; font-weight:600; color:var(--text-muted); letter-spacing:0.04em;">v${escHtml(APP_VERSION)}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -6946,17 +6956,22 @@ export function render(explicitMount = null) {
         </nav>
 
         <!-- Sidebar Footer (User Account Summary) -->
-        <div class="sidebar-footer">
-          <div class="user-snippet" onclick="window.MJK.openUserProfileModal()" style="cursor:pointer;" title="Open My Profile (${escAttrJs(user.uid || user.role)})">
-            <div class="user-avatar">${userAvatarHtml}</div>
-            <div class="user-details">
-              <span class="user-name">${escHtml(user.name)}</span>
-              <span class="user-role-badge">${formatRoleLabel(user.role)}</span>
+        <div class="sidebar-footer" style="flex-direction:column; align-items:stretch; gap:0.45rem;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+            <div class="user-snippet" onclick="window.MJK.openUserProfileModal()" style="cursor:pointer; flex:1; min-width:0;" title="Open My Profile (${escAttrJs(user.uid || user.role)})">
+              <div class="user-avatar">${userAvatarHtml}</div>
+              <div class="user-details">
+                <span class="user-name">${escHtml(user.name)}</span>
+                <span class="user-role-badge">${formatRoleLabel(user.role)}</span>
+              </div>
             </div>
+            <button type="button" class="btn-icon" style="background:transparent; border-color:rgba(148,163,184,0.22); box-shadow:none; color:#CBD5E1; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;" onclick="window.MJK.handleLogout()" title="Logout from MUN COMPUTER">
+              ${getLucideIcon('log-out', 17)}
+            </button>
           </div>
-          <button type="button" class="btn-icon" style="background:transparent; border-color:rgba(148,163,184,0.22); box-shadow:none; color:#CBD5E1; display:inline-flex; align-items:center; justify-content:center;" onclick="window.MJK.handleLogout()" title="Logout from MUN COMPUTER">
-            ${getLucideIcon('log-out', 17)}
-          </button>
+          <div data-testid="dashboard-version-badge" class="font-mono tabular-nums" style="font-size:0.68rem; color:rgba(203,213,225,0.68); letter-spacing:0.05em; text-align:center; padding-top:0.25rem; border-top:1px solid rgba(148,163,184,0.12);">
+            MUN COMPUTER ERP · v${escHtml(APP_VERSION)}
+          </div>
         </div>
       </aside>
 
@@ -7511,9 +7526,6 @@ window.MJK = {
     }
   },
   handleLogout: () => {
-    logout();
-    localStorage.removeItem('mun_computer_v3_user');
-    localStorage.removeItem('mun_current_user');
     AppState.currentRoute = 'dashboard';
     closeModal();
     const sb = document.getElementById('app-sidebar');
@@ -7528,7 +7540,7 @@ window.MJK = {
     } else {
       window.location.hash = '';
     }
-    window.dispatchEvent(new Event('mun-auth-logout'));
+    logout({ reason: 'Signed out of MUN COMPUTER ERP.' });
     showToast('Signed out of MUN COMPUTER ERP.', 'info');
   },
   toggleTopbarProfileMenu: (event) => {
