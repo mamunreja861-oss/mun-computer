@@ -3,6 +3,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import { State, City } from 'country-state-city';
 import { murshidabadMaster } from './murshidabadMaster.js';
+import { getDataDir } from './dataDir.js';
 
 const require = createRequire(import.meta.url);
 
@@ -16,7 +17,7 @@ export interface LocationRecord {
   source?: string;
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const CACHE_FILE = path.join(DATA_DIR, 'location-cache.json');
 const CUSTOM_FILE = path.join(DATA_DIR, 'custom-locations.json');
 

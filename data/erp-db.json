@@ -1540,12 +1540,6 @@
     "tasks": [],
     "timeLogs": []
   },
-  "extendedErp": {},
-  "menuConfig": {
-    "departments": {},
-    "submenus": {},
-    "customSubmenus": []
-  },
   "hrState": {
     "leaves": [],
     "holidays": [],
@@ -1564,5 +1558,11 @@
     "employeeLetters": [],
     "rewardsDisciplinary": [],
     "employeeProfiles": {}
+  },
+  "extendedErp": {},
+  "menuConfig": {
+    "departments": {},
+    "submenus": {},
+    "customSubmenus": []
   }
 }

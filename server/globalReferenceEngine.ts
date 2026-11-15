@@ -2,8 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { getDataDir } from './dataDir.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const SQLITE_DB_PATH = path.join(DATA_DIR, 'mun-computer.db');
 
 export const ORGANIZATION_CODE = 'MUN';

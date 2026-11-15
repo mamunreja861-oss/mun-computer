@@ -21,6 +21,7 @@ import {
   ExtraPermissionControls
 } from './permissions.js';
 import { globalReferenceEngine } from './globalReferenceEngine.js';
+import { getDataDir } from './dataDir.js';
 
 export const MAIN_ADMIN_UID = 'MC-ADM-14012025';
 export const MAIN_ADMIN_NAME = 'Sarmina Khatun';
@@ -30,7 +31,7 @@ const MAIN_ADMIN_AADHAAR_HASH = 'e8f988e40a366f105a24f8730dc984be16390ac57378512
 export type CoreRole = 'ADMIN' | 'MANAGER' | 'STAFF';
 export type CoreAccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const SQLITE_DB_PATH = path.join(DATA_DIR, 'mun-computer.db');
 const USERS_JSON_FILE = path.join(DATA_DIR, 'users.json');
 const AUDIT_LOGS_JSON_FILE = path.join(DATA_DIR, 'audit-logs.json');

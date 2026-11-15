@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getDataDir } from './dataDir.js';
 import { OFFICIAL_PRIORITY_GRAM_PANCHAYATS, OFFICIAL_PRIORITY_VILLAGES } from './murshidabadVillagesData.js';
 import {
   buildInitialWardVillageMasterSeeds,
@@ -242,7 +243,7 @@ export interface MurshidabadMasterDatabase {
   wardVillageMaster?: WardVillageMasterRecord[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const MASTER_FILE = path.join(DATA_DIR, 'murshidabad-master.json');
 
 // Verified Bengali Location Names Dictionary (Murshidabad District, Domkal Subdivision & Priority Areas)

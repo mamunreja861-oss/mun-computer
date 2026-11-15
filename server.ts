@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import express, { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { getDataDir, isVercelRuntime } from './server/dataDir.js';
 import { locationService } from './server/locationService.js';
 import { murshidabadMaster } from './server/murshidabadMaster.js';
 import {
@@ -47,8 +47,8 @@ import {
   LegacyMigrationInputItem
 } from './server/globalReferenceEngine.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename = typeof import.meta?.url === 'string' ? fileURLToPath(import.meta.url) : process.cwd();
+const __dirname = typeof import.meta?.url === 'string' ? path.dirname(__filename) : process.cwd();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -95,7 +95,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const SMS_CONFIG_FILE = path.join(DATA_DIR, 'sms-config.json');
 const UPI_SETTINGS_FILE = path.join(DATA_DIR, 'upi-settings.json');
 
@@ -3937,16 +3937,33 @@ app.delete('/api/annapurna/applications/:id', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// VITE OR STATIC FRONTEND MOUNT
+// API 404 FALLBACK & INITIALIZATION
+// ---------------------------------------------------------------------------
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({ success: false, message: 'API endpoint not found.' });
+});
+
+let _initServicesPromise: Promise<void> | null = null;
+
+export async function initServerServices(): Promise<void> {
+  if (!_initServicesPromise) {
+    _initServicesPromise = (async () => {
+      await relationalDb.init();
+      locationService.init();
+      murshidabadMaster.init();
+      centralDb.init();
+      // Verify Global Reference SL consistency on startup (auto-heals counter floor upward if needed, never resets)
+      globalReferenceEngine.verifyConsistency(true);
+    })();
+  }
+  return _initServicesPromise;
+}
+
+// ---------------------------------------------------------------------------
+// VITE OR STATIC FRONTEND MOUNT (Standalone / Local / Cloud Run only)
 // ---------------------------------------------------------------------------
 async function startServer() {
-  await relationalDb.init();
-  locationService.init();
-  murshidabadMaster.init();
-  centralDb.init();
-
-  // Verify Global Reference SL consistency on startup (auto-heals counter floor upward if needed, never resets)
-  globalReferenceEngine.verifyConsistency(true);
+  await initServerServices();
 
   // Automatic Daily Data Backup Scheduler (runs every 6 hours when operational records exist so fresh DB starts at SL = 0)
   try {
@@ -3978,11 +3995,8 @@ async function startServer() {
     // non-blocking
   }
 
-  app.use('/api', (_req: Request, res: Response) => {
-    res.status(404).json({ success: false, message: 'API endpoint not found.' });
-  });
-
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -4001,4 +4015,9 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!isVercelRuntime()) {
+  startServer();
+}
+
+export { app };
+export default app;

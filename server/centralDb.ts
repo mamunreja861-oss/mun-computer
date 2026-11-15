@@ -4,8 +4,9 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { murshidabadMaster } from './murshidabadMaster.js';
 import { globalReferenceEngine, resolveCanonicalPrefix } from './globalReferenceEngine.js';
+import { getDataDir, getSourceDataDir, isVercelRuntime } from './dataDir.js';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = getDataDir();
 const ERP_DB_FILE = path.join(DATA_DIR, 'erp-db.json');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const AUDIT_LOGS_FILE = path.join(DATA_DIR, 'audit-logs.json');
@@ -964,15 +965,37 @@ function getRuntimeSecretKey(purpose: string): Buffer {
     return crypto.createHash('sha256').update(`${purpose}:${envSecret}`).digest();
   }
 
-  // Persist an installation-local CSPRNG key in data/.server-secret (gitignored) so sessions/encryption stay stable across restarts without hardcoding secrets
+  // Persist an installation-local CSPRNG key in data/.server-secret (or read from bundled source data on Vercel) so sessions/CAPTCHA stay stable across serverless instances
   const secretFile = path.join(DATA_DIR, '.server-secret');
+  const sourceSecretFile = path.join(getSourceDataDir(), '.server-secret');
   let master = '';
   if (fs.existsSync(secretFile)) {
     master = fs.readFileSync(secretFile, 'utf-8').trim();
+  } else if (fs.existsSync(sourceSecretFile)) {
+    master = fs.readFileSync(sourceSecretFile, 'utf-8').trim();
   }
   if (!master || master.length < 32) {
-    master = crypto.randomBytes(48).toString('hex');
-    fs.writeFileSync(secretFile, master, { encoding: 'utf-8', mode: 0o600 });
+    if (isVercelRuntime()) {
+      const vercelSeed =
+        process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+        process.env.VERCEL_URL ||
+        process.env.VERCEL_GIT_REPO_ID ||
+        process.env.VERCEL_GIT_COMMIT_SHA;
+      if (vercelSeed) {
+        master = crypto
+          .createHash('sha512')
+          .update(`mun-vercel:${vercelSeed}:${MAIN_ADMIN_UID}`)
+          .digest('hex');
+      }
+    }
+    if (!master || master.length < 32) {
+      master = crypto.randomBytes(48).toString('hex');
+    }
+    try {
+      fs.writeFileSync(secretFile, master, { encoding: 'utf-8', mode: 0o600 });
+    } catch {
+      // ignore if read-only
+    }
   }
   return crypto.createHash('sha256').update(`${purpose}:${master}`).digest();
 }
